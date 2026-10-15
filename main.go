@@ -71,8 +71,11 @@ type state struct {
 	pending         *opencode.PermissionRequest
 	branch          string
 	surface         int
-	workspaceFiles  []string
+	fsEntries       []opencode.FSEntry
 	filesReady      bool
+	openPath        string
+	openText        string
+	pendingToast    string
 }
 
 func main() {
@@ -252,6 +255,7 @@ func (st *state) view(c *ui.Context) {
 
 	// A tool call waiting for an answer sits above everything.
 	st.permissionDialog(c, t)
+	st.flushToast(c)
 
 	ui.Row(c).FillWidth().FillHeight().AlignItems(ui.Stretch).Children(func() {
 		// Fit the panels to the window so the chat keeps a usable width.
@@ -366,7 +370,7 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 				})
 				if ui.Button(c, "Copy connect URL").FillWidth().Clicked() {
 					mygo.Clipboard.WriteText(st.daemonURL)
-					st.status = "connect URL copied"
+					c.Toast("Connect URL copied")
 				}
 				if ui.Button(c, "Settings").FillWidth().Clicked() {
 					st.openSettings()

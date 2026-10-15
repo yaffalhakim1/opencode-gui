@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
+
+	"github.com/egoist/mygo/ui/editor"
 
 	"github.com/egoist/mygo/ui"
 
@@ -129,5 +133,82 @@ func TestNavBackClosesSettings(t *testing.T) {
 	}
 	if st.set.open {
 		t.Error("Back did not close settings")
+	}
+}
+
+// TestEverySwitchHasAnAccessibleName checks the labels ui.Switch requires:
+// it draws no text of its own, so a switch without one is unnamed for
+// assistive technology, which is an accessibility failure.
+func TestEverySwitchHasAnAccessibleName(t *testing.T) {
+	src, err := os.ReadFile("settings.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, line := range strings.Split(string(src), "\n") {
+		if !strings.Contains(line, "ui.Switch(") {
+			continue
+		}
+		if !strings.Contains(line, ".Label(") {
+			t.Errorf("settings.go:%d: a switch has no Label: %s", i+1, strings.TrimSpace(line))
+		}
+	}
+}
+
+// TestBreakdownUsesATable checks the usage breakdown is a framework table,
+// which sorts, resizes and reads its rows, rather than hand-built rows.
+func TestBreakdownUsesATable(t *testing.T) {
+	src, err := os.ReadFile("settings.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "ui.Table(") {
+		t.Error("the usage breakdown should use ui.Table")
+	}
+	if !strings.Contains(string(src), "ui.TableColumn{") {
+		t.Error("the breakdown table should declare its columns")
+	}
+}
+
+// TestFilesSurfaceUsesATree checks the file browser is a framework tree.
+func TestFilesSurfaceUsesATree(t *testing.T) {
+	src, err := os.ReadFile("panel.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "ui.Tree(") {
+		t.Error("the Files surface should use ui.Tree")
+	}
+}
+
+// TestDiffViewerEnablesReviewFeatures checks the review surface turns on the
+// viewer's hunk actions and reports its statistics.
+func TestDiffViewerEnablesReviewFeatures(t *testing.T) {
+	src, err := os.ReadFile("panel.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(src)
+	for _, want := range []string{"HunkActions: true", "ds.Stats()", "ds.GoToHunk(", "ds.Hunks()"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the diff viewer does not use %s", want)
+		}
+	}
+}
+
+func TestDiffStatsLine(t *testing.T) {
+	var ds editor.DiffState
+	ds.SetPatch(editor.FilePatch{})
+	got := diffStats(&ds)
+	if !strings.Contains(got, "+") || !strings.Contains(got, "−") {
+		t.Errorf("diffStats = %q, want added and deleted counts", got)
+	}
+}
+
+func TestPlural(t *testing.T) {
+	if plural(1) != "" {
+		t.Error("one change should not be plural")
+	}
+	if plural(0) != "s" || plural(2) != "s" {
+		t.Error("zero and many changes should be plural")
 	}
 }

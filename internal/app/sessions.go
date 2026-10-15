@@ -126,6 +126,15 @@ func (s *Sessions) ListDir(ctx context.Context, path string) ([]opencode.FSEntry
 	return srv.ListDir(ctx, path)
 }
 
+// ReadFile reads a workspace file's text.
+func (s *Sessions) ReadFile(ctx context.Context, path string) (string, error) {
+	srv, err := s.server()
+	if err != nil {
+		return "", err
+	}
+	return srv.ReadFile(ctx, path)
+}
+
 // Permissions lists the tool calls waiting for an answer.
 func (s *Sessions) Permissions(ctx context.Context) ([]opencode.PermissionRequest, error) {
 	srv, err := s.server()

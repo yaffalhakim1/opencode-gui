@@ -193,9 +193,11 @@ func settingsCard(c *ui.Context, t *ui.Theme, fn func()) {
 }
 
 // settingsRow is one row of a settings card: the label and its description on
-// the left, the control on the right, as the reference app lays them out. It
-// is a plain row rather than ui.Form, whose labels sit in a column of their
-// own, which is a different shape from the reference.
+// the left, the control on the right, as the reference app lays them out.
+//
+// It is a plain row rather than ui.Form/ui.Field: a Form puts labels in their
+// own right-aligned column (macOS style), which is a different shape from the
+// reference. The control keeps its own accessible name through .Label().
 func settingsRow(c *ui.Context, t *ui.Theme, title, desc string, control func()) {
 	ui.Row(c).FillWidth().Gap(16).AlignItems(ui.Center).Padding(10, 0).Children(func() {
 		ui.Column(c).Grow(1).Gap(2).Children(func() {
@@ -206,6 +208,12 @@ func settingsRow(c *ui.Context, t *ui.Theme, title, desc string, control func())
 		})
 		control()
 	})
+}
+
+// labelledSwitch is a switch named for assistive technology, which ui.Switch
+// requires since it draws no text of its own.
+func labelledSwitch(c *ui.Context, on *bool, label string) ui.Element {
+	return ui.Switch(c, on).Label(label)
 }
 
 // sectionHeader is the page title, as "General".
@@ -222,7 +230,7 @@ func (st *state) sectionGeneral(c *ui.Context, t *ui.Theme) {
 		settingsRow(c, t, "Automatic updates",
 			"Check for new versions in the background and offer to install them", func() {
 				on := true
-				ui.Switch(c, &on)
+				ui.Switch(c, &on).Label("Automatic updates")
 			})
 	})
 	settingsCard(c, t, func() {
@@ -305,7 +313,7 @@ func (st *state) sectionDaemon(c *ui.Context, t *ui.Theme) {
 	settingsCard(c, t, func() {
 		settingsRow(c, t, "Expose managed daemon",
 			"Listen beyond this machine so another client can connect", func() {
-				ui.Switch(c, &st.set.daemonExpose)
+				ui.Switch(c, &st.set.daemonExpose).Label("Expose managed daemon")
 			})
 	})
 
@@ -470,7 +478,7 @@ func (st *state) skillDetail(c *ui.Context, t *ui.Theme) {
 			ui.Text(c, "Available in every project").FontSize(12).TextColor(t.TextMuted)
 		})
 		on := s.Autoinvoke
-		ui.Switch(c, &on)
+		ui.Switch(c, &on).Label(s.Name + " auto-invoke")
 	})
 
 	if s.Description != "" {
@@ -554,29 +562,34 @@ func (st *state) sectionUsage(c *ui.Context, t *ui.Theme) {
 		})
 	}
 
-	// Per-model breakdown.
+	// Per-model breakdown, as a table: the framework sorts, resizes and moves
+	// the columns, and reads the rows to assistive technology.
 	settingsCard(c, t, func() {
-		ui.Text(c, "Breakdown").FontWeight(500)
-		ui.Row(c).FillWidth().Gap(12).Padding(6, 0).Children(func() {
-			ui.Text(c, "Model").Grow(1).FontSize(11).TextColor(t.TextMuted)
-			ui.Text(c, "Cost").Width(90).FontSize(11).TextColor(t.TextMuted)
-			ui.Text(c, "Share").Width(70).FontSize(11).TextColor(t.TextMuted)
-			ui.Text(c, "Tokens").Width(90).FontSize(11).TextColor(t.TextMuted)
-		})
-		ui.Divider(c)
+		ui.Text(c, "Breakdown").FontSize(13.5).FontWeight(500)
 		total := totalTokens(u.Tokens)
-		for _, m := range u.Models {
-			ui.Row(c).FillWidth().Gap(12).Padding(6, 0).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, m.Model.ID).Grow(1).FontSize(12).MaxLines(1).Ellipsis("…")
-				ui.Text(c, humanCost(m.Cost)).Width(90).FontSize(12)
+		cols := []ui.TableColumn{
+			{Title: "Model"},
+			{Title: "Cost", Width: 90, Align: ui.End},
+			{Title: "Share", Width: 70, Align: ui.End},
+			{Title: "Tokens", Width: 90, Align: ui.End},
+		}
+		ui.Table(c, nil, cols, len(u.Models), func(row, col int) {
+			m := u.Models[row]
+			switch col {
+			case 0:
+				ui.Text(c, m.Model.ID).SingleLine()
+			case 1:
+				ui.Text(c, humanCost(m.Cost))
+			case 2:
 				share := "—"
 				if total > 0 {
 					share = fmt.Sprintf("%.1f%%", totalTokens(m.Tokens)/total*100)
 				}
-				ui.Text(c, share).Width(70).FontSize(12)
-				ui.Text(c, humanTokens(totalTokens(m.Tokens))).Width(90).FontSize(12)
-			})
-		}
+				ui.Text(c, share)
+			case 3:
+				ui.Text(c, humanTokens(totalTokens(m.Tokens)))
+			}
+		}).Grow(1).Height(240).Label("Usage by model")
 	})
 }
 

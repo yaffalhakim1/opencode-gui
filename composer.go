@@ -262,6 +262,22 @@ func (st *state) submit() {
 	}()
 }
 
+// toast shows a short message, from a goroutine: Window.Update runs it on the
+// main thread, where a view may toast.
+func (st *state) toast(msg string) {
+	st.win.Update(func() { st.pendingToast = msg })
+}
+
+// flushToast shows a message queued from a goroutine. It runs inside the
+// view, where c.Toast is available.
+func (st *state) flushToast(c *ui.Context) {
+	if st.pendingToast == "" {
+		return
+	}
+	c.Toast(st.pendingToast)
+	st.pendingToast = ""
+}
+
 // flushQueued sends the next queued follow-up once the turn settles.
 func (st *state) flushQueued() {
 	st.mu.Lock()
