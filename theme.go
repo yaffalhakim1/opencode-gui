@@ -2,6 +2,38 @@ package main
 
 import "github.com/egoist/mygo/ui"
 
+// Measurements taken from the reference app's source (waku src/app/*.rs and
+// persistence.rs) so the proportions match, not guessed.
+const (
+	// Layout widths.
+	sidebarWidthDefault = 252 // DEFAULT_SIDEBAR_WIDTH
+	sidebarWidthMin     = 180 // SIDEBAR_MIN_WIDTH
+	sidebarWidthMax     = 420 // SIDEBAR_MAX_WIDTH
+	panelWidthDefault   = 380 // DEFAULT_RIGHT_PANEL_WIDTH is 460; 380 fits a 1280 window
+	panelWidthMin       = 280 // RIGHT_PANEL_MIN_WIDTH
+	panelWidthMax       = 1000
+
+	// The chat and composer share one centered column, as their CONTENT_MAX_WIDTH.
+	contentMaxWidth = 720
+
+	// Sidebar rows.
+	sessionRowHeight  = 32 // SIDEBAR_SESSION_CARD_HEIGHT
+	actionRowHeight   = 32 // SIDEBAR_ACTION_ROW_HEIGHT
+	groupHeaderHeight = 28 // SIDEBAR_GROUP_HEADER_HEIGHT
+	groupSpacer       = 10 // SIDEBAR_GROUP_SPACER_HEIGHT
+	searchBottomGap   = 10 // SIDEBAR_SEARCH_BOTTOM_GAP
+
+	// Composer.
+	composerPadX     = 20
+	composerPadY     = 8
+	composerRadius   = 12
+	composerPadInner = 12
+	chipHeight       = 26
+	chipRadius       = 6
+	sendHeight       = 29
+	sendRadius       = 7
+)
+
 // darkUI toggles the graphite look. The reference (Kerenzikov light) is the
 // default; set this true for its dark palette.
 const darkUI = false
@@ -36,7 +68,7 @@ func kerenzikovTheme(dark bool) *ui.Theme {
 	t.InverseText = ui.Hex("#F8F8F9")
 	t.Scrollbar = ui.Hex("#C9C9C9")
 	t.ScrollbarWidth = 8
-	t.Radius = 10 // Kerenzikov's rounded cards
+	t.Radius = 8
 	t.Spacing = 4
 	t.FontSize = 14
 
@@ -65,9 +97,6 @@ func kerenzikovTheme(dark bool) *ui.Theme {
 	return &t
 }
 
-// Card and layout helpers that give Kerenzikov's look: soft raised cards,
-// generous radii, quiet borders.
-
 // sidebarColor is the source list's own surface, a touch distinct from the
 // canvas, as the reference app's sidebar is.
 func sidebarColor(t *ui.Theme) ui.Color {
@@ -77,15 +106,25 @@ func sidebarColor(t *ui.Theme) ui.Color {
 	return ui.Hex("#F3F3F3")
 }
 
-// card styles a container as a Kerenzikov panel.
+// card styles a container as the reference app's raised panel.
 func card(c *ui.Context, t *ui.Theme) ui.Element {
 	return ui.Column(c).Radius(16).Padding(16).
 		Background(t.Surface).
 		Border(1, t.Border)
 }
 
-// pill styles a small rounded chip, as the model/effort/access chips.
-func pill(c *ui.Context, t *ui.Theme) ui.Element {
-	return ui.Row(c).Radius(999).Padding(4, 10).Gap(6).
+// chip is one small rounded control, as the model/access chips: 26 high,
+// 6 radius, as the reference composer's.
+func chip(c *ui.Context, t *ui.Theme) ui.Element {
+	return ui.Row(c).Height(chipHeight).Radius(chipRadius).
+		Padding(0, 10).Gap(6).
 		Background(t.Background).Border(1, t.Border)
+}
+
+// contentColumn centers the chat and composer in the 720-wide column the
+// reference app uses, so long replies do not run edge to edge.
+func contentColumn(c *ui.Context, fn func()) {
+	ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
+		ui.Column(c).Width(contentMaxWidth).Children(fn)
+	})
 }

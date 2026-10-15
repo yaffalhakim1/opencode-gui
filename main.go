@@ -58,7 +58,7 @@ type state struct {
 func main() {
 	st := &state{
 		sessions:     &app.Sessions{},
-		sidebarWidth: 240,
+		sidebarWidth: sidebarWidthDefault,
 		ctx:          context.Background(),
 	}
 	st.chatList.FollowEnd = true
@@ -223,7 +223,7 @@ func (st *state) view(c *ui.Context) {
 
 		// ── Right panel ──────────────────────────────────────────
 		if st.tab >= 0 {
-			ui.Column(c).Width(400).FillHeight().
+			ui.Column(c).Width(panelWidthDefault).FillHeight().
 				Background(t.Background).
 				BorderWidth(0, 0, 0, 1).BorderColor(t.Border).
 				Children(func() {
@@ -262,7 +262,8 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme) {
 							continue
 						}
 						shown++
-						row := ui.Row(c).Gap(8).Padding(6, 10).Radius(8).AlignItems(ui.Center)
+						row := ui.Row(c).Height(sessionRowHeight).Radius(7).
+							Padding(0, 10).Gap(8).AlignItems(ui.Center)
 						row.Children(func() {
 							ui.Text(c, truncate(title, 30)).Grow(1).MaxLines(1).Ellipsis("…")
 							if s.ID == sel {
@@ -410,61 +411,70 @@ func (st *state) chat(c *ui.Context, t *ui.Theme) {
 	st.mu.Unlock()
 
 	if len(msgs) == 0 {
-		ui.Column(c).Grow(1).FillWidth().Center().Gap(10).Children(func() {
-			ui.Text(c, "*").FontSize(28).TextColor(t.Accent)
+		ui.Column(c).Grow(1).FillWidth().Center().Gap(8).Children(func() {
+			ui.Text(c, "*").FontSize(26).TextColor(t.Accent)
 			ui.Text(c, "What should we build?").FontSize(22).Bold()
-			ui.Text(c, "Type below, or ask on your phone.").TextColor(t.TextMuted)
+			ui.Text(c, "Type below, or ask on your phone.").
+				FontSize(14).TextColor(t.TextMuted)
 		})
 		return
 	}
 
 	ui.List(c, &st.chatList, len(msgs), func(i int) {
 		m := msgs[i]
-		if m.Role == "assistant" {
-			ui.Column(c).FillWidth().Padding(10, 24).Children(func() {
-				if m.Done {
-					markdown.View(c, m.Text, &st.md)
-				} else {
-					markdown.Stream(c, m.Text, &st.md)
-				}
-			})
-			return
-		}
-		// The user's own message: a right-aligned rounded bubble.
-		ui.Row(c).FillWidth().Justify(ui.End).Padding(10, 24).Children(func() {
-			ui.Column(c).Radius(14).Padding(10, 14).MaxWidth(560).
-				Background(t.Surface).Border(1, t.Border).Children(func() {
-				ui.Text(c, m.Text).Wrap().Selectable().FillWidth()
+		contentColumn(c, func() {
+			if m.Role == "assistant" {
+				ui.Column(c).FillWidth().Padding(10, 20).Children(func() {
+					if m.Done {
+						markdown.View(c, m.Text, &st.md)
+					} else {
+						markdown.Stream(c, m.Text, &st.md)
+					}
+				})
+				return
+			}
+			// The user's own message: a right-aligned rounded bubble.
+			ui.Row(c).FillWidth().Justify(ui.End).Padding(10, 20).Children(func() {
+				ui.Column(c).Radius(14).Padding(10, 14).MaxWidth(560).
+					Background(t.Surface).Border(1, t.Border).Children(func() {
+					ui.Text(c, m.Text).Wrap().Selectable().FillWidth()
+				})
 			})
 		})
 	}).Grow(1).Gap(4).Justify(ui.End)
 }
 
 // composer is the large rounded input card with the model/access chips,
-// as the reference app's.
+// measured from the reference app: 20px side padding, 8px bottom, a 720
+// wide column, 12px radius, 12px inner padding.
 func (st *state) composer(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Padding(12, 24, 20).Children(func() {
-		box := card(c, t).Gap(10)
-		box.Children(func() {
-			input := ui.TextInput(c, &st.prompt).
-				Placeholder("Do anything…").FillWidth()
-			input.OnSubmit(st.send)
+	ui.Row(c).FillWidth().Justify(ui.Center).
+		Padding(0, composerPadX, composerPadY).Children(func() {
+		ui.Column(c).Width(contentMaxWidth).Children(func() {
+			box := ui.Column(c).Radius(composerRadius).Padding(composerPadInner).
+				Background(t.Background).Border(1, t.Border).Gap(9)
+			box.Children(func() {
+				input := ui.TextInput(c, &st.prompt).
+					Placeholder("Do anything…").FillWidth()
+				input.OnSubmit(st.send)
 
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				model := "deepseek-v4-1-flash"
-				if st.modelName != "" {
-					model = st.modelName
-				}
-				ui.Row(c).Radius(999).Padding(3, 10).Gap(6).Background(t.Background).Border(1, t.Border).Children(func() {
-					ui.Text(c, model).FontSize(12).TextColor(t.TextMuted)
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					model := "deepseek-v4-1-flash"
+					if st.modelName != "" {
+						model = st.modelName
+					}
+					chip(c, t).Children(func() {
+						ui.Text(c, model).FontSize(12).TextColor(t.TextMuted)
+					})
+					chip(c, t).Children(func() {
+						ui.Text(c, "Full access").FontSize(12).TextColor(t.TextMuted)
+					})
+					ui.Spacer(c)
+					if ui.PrimaryButton(c, "↑").Height(sendHeight).
+						Radius(sendRadius).Clicked() {
+						st.send()
+					}
 				})
-				ui.Row(c).Radius(999).Padding(3, 10).Gap(6).Background(t.Background).Border(1, t.Border).Children(func() {
-					ui.Text(c, "Full access").FontSize(12).TextColor(t.TextMuted)
-				})
-				ui.Spacer(c)
-				if ui.PrimaryButton(c, "↑").Clicked() {
-					st.send()
-				}
 			})
 		})
 	})
