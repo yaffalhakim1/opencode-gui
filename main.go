@@ -44,6 +44,7 @@ type state struct {
 	tab     int // inspector tab: 0 diff, 1 files
 
 	sidebarWidth   float32
+	sidebarList    ui.ListState
 	chatList       ui.ListState
 	md             markdown.Options
 	diffState      *editor.DiffState
@@ -306,48 +307,51 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 				ui.SearchField(c, &st.filter).Label("Filter sessions").FillWidth()
 			})
 
-			ui.Scroll(c).Grow(1).Children(func() {
-				ui.Column(c).Gap(2).Padding(6, 8, 12).Children(func() {
-					shown := 0
-					group := ""
-					for _, s := range sessions {
-						title := sessionLabel(s)
-						if query != "" && !strings.Contains(strings.ToLower(title), strings.ToLower(query)) {
-							continue
-						}
-						shown++
-
-						// A group header whenever the bucket changes, as the
-						// reference app's Today / Yesterday / This Week rows.
-						if g := sessionGroup(s); g != group {
-							group = g
-							ui.Text(c, g).FontSize(13).FontWeight(500).
-								TextColor(t.TextMuted).Padding(10, 10, 4)
-						}
-
-						row := ui.Row(c).Radius(7).Padding(7, 10).Gap(6).
-							AlignItems(ui.Center)
-						row.Children(func() {
-							ui.Text(c, truncate(title, 30)).FontSize(13.5).Grow(1).
-								MaxLines(1).Ellipsis("…")
-							if s.ID == sel {
-								ui.Text(c, "•").TextColor(t.Accent)
-							}
-						})
-						if row.Hovered() {
-							row.Background(itemBg(t))
-						}
-						if s.ID == sel {
-							row.Background(itemBg(t))
-						}
-						if row.Clicked() {
-							st.selectSession(s.ID)
-						}
-					}
-					if shown == 0 {
-						ui.Text(c, "No sessions").FontSize(13).TextColor(t.TextMuted).Padding(8)
+			// The session list is a List, which builds only the rows in view,
+			// so a long history stays cheap.
+			visible := make([]opencode.Session, 0, len(sessions))
+			for _, s := range sessions {
+				if query != "" &&
+					!strings.Contains(strings.ToLower(sessionLabel(s)), strings.ToLower(query)) {
+					continue
+				}
+				visible = append(visible, s)
+			}
+			st.sidebarList.Key = func(i int) any {
+				if i < len(visible) {
+					return visible[i].ID
+				}
+				return i
+			}
+			ui.List(c, &st.sidebarList, len(visible), func(i int) {
+				s := visible[i]
+				// A group header whenever the bucket changes, as the reference
+				// app's Today / Yesterday / This Week rows.
+				if g := sessionGroup(s); i == 0 || g != sessionGroup(visible[i-1]) {
+					ui.Text(c, g).FontSize(13).FontWeight(500).
+						TextColor(t.TextMuted).Padding(10, 10, 4)
+				}
+				row := ui.Row(c).Radius(7).Padding(7, 10).Gap(6).AlignItems(ui.Center)
+				row.Children(func() {
+					ui.Text(c, truncate(sessionLabel(s), 30)).FontSize(13.5).Grow(1).
+						MaxLines(1).Ellipsis("…")
+					if s.ID == sel {
+						ui.Text(c, "•").TextColor(t.Accent)
 					}
 				})
+				if row.Hovered() {
+					row.Background(itemBg(t))
+				}
+				if s.ID == sel {
+					row.Background(itemBg(t))
+				}
+				if row.Clicked() {
+					st.selectSession(s.ID)
+				}
+			}).Grow(1).Children(func() {
+				if len(visible) == 0 {
+					ui.Text(c, "No sessions").FontSize(13).TextColor(t.TextMuted).Padding(8)
+				}
 			})
 
 			ui.Column(c).Gap(6).Padding(12).
@@ -461,14 +465,13 @@ func (st *state) toolbar(c *ui.Context, t *ui.Theme) {
 	active := st.active
 	st.mu.Unlock()
 
-	ui.Row(c).Gap(10).Padding(10, 12).AlignItems(ui.Center).Height(48).
-		BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
+	ui.Toolbar(c, func() {
 		// Top-left: expand/collapse the left panel.
 		leftGlyph := "◧"
 		if st.leftCollapsed {
 			leftGlyph = "▣"
 		}
-		if ui.Button(c, leftGlyph).Width(32).Clicked() {
+		if ui.Button(c, leftGlyph).Label("Toggle left panel").Clicked() {
 			st.leftCollapsed = !st.leftCollapsed
 		}
 
@@ -497,11 +500,12 @@ func (st *state) toolbar(c *ui.Context, t *ui.Theme) {
 		if st.rightCollapsed {
 			rightGlyph = "▣"
 		}
-		if ui.Button(c, rightGlyph).Width(32).Clicked() {
+		if ui.Button(c, rightGlyph).Label("Toggle right panel").Clicked() {
 			st.tab = 0
 			st.rightCollapsed = !st.rightCollapsed
 		}
-	})
+	}).FillWidth().Height(48).
+		BorderWidth(0, 0, 1, 0).BorderColor(t.Border)
 }
 
 // chat renders the message list, or the centered empty state.
