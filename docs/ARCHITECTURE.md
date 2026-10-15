@@ -4,7 +4,7 @@ A MyGo desktop GUI for opencode, with a daemon so an Android app (later) can tal
 
 ## Verdict on your two ideas
 
-1. **Daemon WebSocket — correct, and it's the same daemon.** The MyGo desktop app *is* the daemon. One Go binary runs: (a) the webview GUI, (b) a small LAN WebSocket server. The Android app connects to the WS server over Tailscale. Don't build a separate daemon process — two processes, two sets of state, no benefit at this scale.
+1. **Daemon WebSocket — correct, and it's the same daemon.** The MyGo desktop app *is* the daemon. One Go binary runs: (a) the native-UI GUI, (b) a small LAN WebSocket server. The Android app connects to the WS server over Tailscale. Don't build a separate daemon process — two processes, two sets of state, no benefit at this scale.
 
 2. **Tailscale — correct, and it removes 90% of the security work.** Tailscale gives mutual auth + encryption on the WireGuard layer. The WS server binds to the Tailscale interface (or `0.0.0.0` + token) and never touches the public internet. Do NOT build your own auth crypto; a single shared token is enough defense-in-depth.
 
@@ -62,15 +62,12 @@ opencode-gui/
 │   ├── daemon/             LAN WS server for Android
 │   │   ├── server.go       :9680, token auth, tailscale iface bind
 │   │   └── protocol.go     request/response/event envelope, dispatcher
-│   └── app/                services bound to the MyGo frontend
+│   └── app/                services called by the native view AND daemon handlers
 │       └── service.go      SessionService, FileService, DaemonService
-├── src/                    Vite frontend (mygo generate → src/mygo.ts)
-│   ├── main.ts
-│   ├── state.ts            stores fed by mygo events
-│   └── components/         session list, chat view, prompt bar, permission dialog
+├── internal/ui/            native views (package ui): sidebar, chat, inspector
 ├── docs/
 │   └── ARCHITECTURE.md     this file
-├── mygo.config.ts
+├── mygo.json               app name, identifier, version (native template)
 └── go.mod
 ```
 

@@ -1,10 +1,10 @@
 # opencode-gui
 
-A desktop GUI for [opencode](https://opencode.ai), built with [MyGo](https://mygo.egoist.dev) (Go + system webview), with a built-in daemon so an Android app can drive it over Tailscale.
+A desktop GUI for [opencode](https://opencode.ai), built with [MyGo](https://mygo.egoist.dev) native UI (pure Go, drawn on the GPU, no webview), with a built-in daemon so an Android app can drive it over Tailscale.
 
 **One binary, two front doors:**
 
-- Desktop GUI (webview) for chatting with opencode agents
+- Desktop GUI (native UI) for chatting with opencode agents
 - LAN WebSocket daemon (`:9680`) that phones connect to via the Tailscale IP + token
 
 ## Docs
@@ -22,9 +22,9 @@ A desktop GUI for [opencode](https://opencode.ai), built with [MyGo](https://myg
 ## Quick start (once code lands, day 1+)
 
 ```bash
-# prerequisites: Go 1.27+, Bun, opencode on PATH
-bun run dev          # runs mygo dev (rebuilds Go + frontend)
-bun run build        # packaged Windows app in build/
+# prerequisites: Go 1.27+, opencode on PATH
+go tool mygo dev     # rebuilds + restarts on .go changes
+go tool mygo build   # packaged Windows app in build/
 ```
 
 ## Connecting a phone

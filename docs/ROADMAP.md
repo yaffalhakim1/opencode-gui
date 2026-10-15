@@ -3,10 +3,10 @@
 Budget: unlimited credits, 5 calendar days. Scope is frozen at the bottom of each day; anything unfinished rolls to the Android repo's backlog, not into the next day.
 
 ## Day 1 — Skeleton + round-trip
-- `mygo init opencode-gui` (web frontend, Vite + TS)
+- `mygo init -template native opencode-gui` (pure Go, package `ui`)
 - `internal/opencode`: spawn `opencode serve --port 4096` as child process, poll `/global/health`, clean shutdown
-- `internal/app`: bound `SessionService` — list, create, prompt (sync round-trip)
-- GUI: session list + prompt box + plain-text response
+- `internal/app`: service methods — list, create, prompt (sync round-trip), called directly by the view
+- GUI: sidebar session list + prompt `ui.Text` input + plain `ui.Text` response
 - **Done when:** you type in the desktop app and get an answer.
 
 ## Day 2 — Streaming chat
