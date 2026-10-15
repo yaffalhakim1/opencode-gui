@@ -108,6 +108,25 @@ func (s *Sessions) Messages(ctx context.Context, sessionID string) ([]opencode.M
 	return srv.Messages(ctx, sessionID)
 }
 
+// Diff returns a session's file changes.
+func (s *Sessions) Diff(ctx context.Context, sessionID string) ([]opencode.FileDiff, error) {
+	srv, err := s.server()
+	if err != nil {
+		return nil, err
+	}
+	return srv.Diff(ctx, sessionID)
+}
+
+// Watch streams events for a session, calling onChange (already debounced
+// upstream) so the caller can re-read state. Runs until ctx is canceled.
+func (s *Sessions) Watch(ctx context.Context, sessionID string, onChange func()) {
+	srv, err := s.server()
+	if err != nil {
+		return
+	}
+	srv.RefreshLoop(ctx, sessionID, onChange)
+}
+
 // Active returns the active session ID.
 func (s *Sessions) Active() string {
 	s.mu.Lock()

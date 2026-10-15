@@ -15,10 +15,12 @@ type Session struct {
 
 // Message is one session message. v2 messages carry content blocks, not
 // parts: {type: "assistant"|"user", content: [{type: "text", text}]}.
+// Finish is set on assistant messages once the model stopped.
 type Message struct {
 	ID      string `json:"id"`
 	Type    string `json:"type"`
 	Content []Part `json:"content"`
+	Finish  string `json:"finish"`
 }
 
 // Part is one content block of a message.

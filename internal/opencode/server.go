@@ -121,3 +121,24 @@ func freePort(port int) bool {
 	ln.Close()
 	return true
 }
+
+// errStatus is a small error for non-2xx responses without a body.
+func errStatus(what string, code int) error {
+	return fmt.Errorf("%s: HTTP %d", what, code)
+}
+
+// FileDiff is one file's changes in a session, per FileDiff.Info.
+type FileDiff struct {
+	File      string `json:"file"`
+	Patch     string `json:"patch"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Status    string `json:"status"`
+}
+
+// Diff returns the session's file changes.
+func (s *Server) Diff(ctx context.Context, sessionID string) ([]FileDiff, error) {
+	var out envelope[[]FileDiff]
+	err := s.Get(ctx, "/api/session/"+sessionID+"/diff", &out)
+	return out.Data, err
+}
