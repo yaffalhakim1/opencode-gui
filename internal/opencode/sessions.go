@@ -80,3 +80,20 @@ func (s *Server) Messages(ctx context.Context, sessionID string) ([]MessagePair,
 	}
 	return out, nil
 }
+
+// Agent is one registered agent, per Agent.Info.
+type Agent struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Model *struct {
+		ID         string `json:"id"`
+		ProviderID string `json:"providerID"`
+	} `json:"model"`
+}
+
+// Agents lists the registered agents.
+func (s *Server) Agents(ctx context.Context) ([]Agent, error) {
+	var out envelope[[]Agent]
+	err := s.Get(ctx, "/api/agent", &out)
+	return out.Data, err
+}

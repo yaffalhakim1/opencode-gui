@@ -108,6 +108,15 @@ func (s *Sessions) Messages(ctx context.Context, sessionID string) ([]opencode.M
 	return srv.Messages(ctx, sessionID)
 }
 
+// Agents lists the registered agents.
+func (s *Sessions) Agents(ctx context.Context) ([]opencode.Agent, error) {
+	srv, err := s.server()
+	if err != nil {
+		return nil, err
+	}
+	return srv.Agents(ctx)
+}
+
 // Diff returns a session's file changes.
 func (s *Sessions) Diff(ctx context.Context, sessionID string) ([]opencode.FileDiff, error) {
 	srv, err := s.server()

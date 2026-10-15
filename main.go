@@ -49,6 +49,8 @@ type state struct {
 	daemon        *daemon.Daemon
 	daemonURL     string
 	diffFile      string
+	filter        string
+	modelName     string
 	ctx           context.Context
 	cancelSession context.CancelFunc
 }
@@ -77,11 +79,12 @@ func main() {
 		} else {
 			st.loadSessions()
 			st.startDaemon(st.ctx)
+			go func() { time.Sleep(time.Second); st.loadModel() }()
 		}
 		st.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:     "OpenCode GUI",
 			Width:     1280,
-			Height:    820,
+			Height:    800,
 			MinWidth:  900,
 			MinHeight: 560,
 			StateKey:  "main",
@@ -186,71 +189,155 @@ func (st *state) refreshActive() {
 	st.win.Update(func() {})
 }
 
-func (st *state) view(c *ui.Context) {
-	t := c.Theme()
+// loadModel sets the model name shown in the composer chip.
+func (st *state) loadModel() {
+	agents, err := st.sessions.Agents(st.ctx)
+	if err != nil {
+		return
+	}
+	for _, a := range agents {
+		if a.Model != nil && a.Model.ID != "" {
+			st.mu.Lock()
+			st.modelName = a.Model.ID
+			st.mu.Unlock()
+			st.win.Update(func() {})
+			return
+		}
+	}
+}
 
-	ui.Row(c).Fill().Children(func() {
+func (st *state) view(c *ui.Context) {
+	t := kerenzikovTheme(c.Theme().Dark)
+	c.SetTheme(t)
+
+	ui.Row(c).FillWidth().FillHeight().AlignItems(ui.Stretch).Children(func() {
 		// ── Sidebar ──────────────────────────────────────────────
-		st.sidebar(c)
+		st.sidebar(c, t)
 
 		// ── Chat ─────────────────────────────────────────────────
-		ui.Column(c).Grow(1).Fill().Children(func() {
+		ui.Column(c).Grow(1).FillHeight().Children(func() {
 			st.toolbar(c, t)
 			st.chat(c, t)
-			st.composer(c)
+			st.composer(c, t)
 		})
 
-		// ── Inspector ────────────────────────────────────────────
+		// ── Right panel ──────────────────────────────────────────
 		if st.tab >= 0 {
-			ui.Column(c).Width(420).Fill().Background(t.Surface).Children(func() {
-				st.inspector(c, t)
-			})
+			ui.Column(c).Width(400).FillHeight().
+				Background(t.Background).
+				BorderWidth(0, 0, 0, 1).BorderColor(t.Border).
+				Children(func() {
+					st.panel(c, t)
+				})
 		}
 	})
 }
 
-// sidebar lists sessions and actions.
-func (st *state) sidebar(c *ui.Context) {
+// sidebar lists sessions with a search field and time groups, as the
+// reference app's source list.
+func (st *state) sidebar(c *ui.Context, t *ui.Theme) {
 	st.mu.Lock()
 	sel := st.active
 	sessions := append([]opencode.Session(nil), st.sessionsList...)
+	query := st.filter
 	st.mu.Unlock()
 
-	ui.Sidebar(c, &sel, func() {
-		ui.SidebarSection(c, "Sessions", nil, func() {
-			for _, s := range sessions {
-				title := s.Title
-				if title == "" {
-					title = s.ID
+	ui.Column(c).Width(st.sidebarWidth).FillHeight().
+		Background(sidebarColor(t)).
+		BorderWidth(0, 1, 0, 0).BorderColor(t.Border).
+		Children(func() {
+			ui.Column(c).Gap(8).Padding(12).Children(func() {
+				if ui.PrimaryButton(c, "New session").FillWidth().Clicked() {
+					go st.newSession()
 				}
-				ui.SidebarItem(c, s.ID, nil, title)
-			}
-		})
-		ui.SidebarSection(c, "Actions", nil, func() {
-			if ui.SidebarItem(c, "+new", nil, "New session").Clicked() {
-				go st.newSession()
-			}
-		})
-		ui.SidebarSection(c, "Daemon", nil, func() {
-			clients := 0
-			if st.daemon != nil {
-				clients = st.daemon.Clients()
-			}
-			ui.SidebarItem(c, "daemon", nil, fmt.Sprintf("Phones: %d", clients))
-			if ui.SidebarItem(c, "copyurl", nil, "Copy connect URL").Clicked() {
-				mygo.Clipboard.WriteText(st.daemonURL)
-			}
-		})
-	}).Width(st.sidebarWidth)
+				ui.TextInput(c, &st.filter).Placeholder("Filter sessions").FillWidth()
+			})
 
-	if sel != "" && sel != st.activeID() {
-		st.mu.Lock()
-		st.active = sel
-		st.messages = nil
-		st.diffs = nil
+			ui.Scroll(c).Grow(1).Children(func() {
+				ui.Column(c).Gap(2).Padding(6, 8, 12).Children(func() {
+					shown := 0
+					for _, s := range sessions {
+						title := sessionLabel(s)
+						if query != "" && !strings.Contains(strings.ToLower(title), strings.ToLower(query)) {
+							continue
+						}
+						shown++
+						row := ui.Row(c).Gap(8).Padding(6, 10).Radius(8).AlignItems(ui.Center)
+						row.Children(func() {
+							ui.Text(c, truncate(title, 30)).Grow(1).MaxLines(1).Ellipsis("…")
+							if s.ID == sel {
+								ui.Text(c, "•").TextColor(t.Accent)
+							}
+						})
+						if row.Hovered() {
+							row.Background(t.SurfaceHover)
+						}
+						if s.ID == sel {
+							row.Background(t.Surface)
+						}
+						if row.Clicked() {
+							st.selectSession(s.ID)
+						}
+					}
+					if shown == 0 {
+						ui.Text(c, "No sessions").TextColor(t.TextMuted).Padding(8)
+					}
+				})
+			})
+
+			ui.Column(c).Gap(6).Padding(12).
+				BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
+				clients := 0
+				if st.daemon != nil {
+					clients = st.daemon.Clients()
+				}
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "Daemon").FontSize(11).TextColor(t.TextMuted)
+					ui.Badge(c, fmt.Sprintf("%d phone(s)", clients))
+				})
+				if ui.Button(c, "Copy connect URL").FillWidth().Clicked() {
+					mygo.Clipboard.WriteText(st.daemonURL)
+					st.status = "connect URL copied"
+				}
+			})
+		})
+}
+
+// selectSession makes a session active and loads it.
+func (st *state) selectSession(id string) {
+	st.mu.Lock()
+	if id == st.active {
 		st.mu.Unlock()
-		st.refreshActive()
+		return
 	}
+	st.active = id
+	st.messages = nil
+	st.diffs = nil
+	st.diffState = nil
+	st.mu.Unlock()
+	st.refreshActive()
+}
+
+// truncate shortens s to n runes with an ellipsis.
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
+}
+
+// sessionLabel is a session's title, or a short stand-in for a session that
+// has none (a raw ses_… id reads as noise in the list).
+func sessionLabel(s opencode.Session) string {
+	if t := strings.TrimSpace(s.Title); t != "" {
+		return t
+	}
+	id := strings.TrimPrefix(s.ID, "ses_")
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	return "Session " + id
 }
 
 // newSession creates a session and makes it active.
@@ -275,32 +362,40 @@ func (st *state) activeID() string {
 	return st.active
 }
 
-// toolbar shows the project, model, run state and controls.
+// toolbar is the quiet top bar: title on the left, status and controls on
+// the right.
 func (st *state) toolbar(c *ui.Context, t *ui.Theme) {
 	st.mu.Lock()
 	running := st.running
 	status := st.status
 	tab := st.tab
+	active := st.active
 	st.mu.Unlock()
 
-	ui.Toolbar(c, func() {
-		ui.Text(c, "OpenCode").Bold()
-		ui.Text(c, fmt.Sprintf(":%d", st.sessions.Port())).TextColor(t.TextMuted)
-		if status != "" {
-			ui.Text(c, status).TextColor(t.TextMuted)
+	ui.Row(c).Gap(10).Padding(10, 16).AlignItems(ui.Center).Height(48).
+		BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
+		title := "New task"
+		st.mu.Lock()
+		for _, s := range st.sessionsList {
+			if s.ID == active && s.Title != "" {
+				title = s.Title
+			}
 		}
+		st.mu.Unlock()
+		ui.Text(c, truncate(title, 48)).Bold().MaxLines(1)
 		ui.Spacer(c)
 		if running {
 			ui.Spinner(c)
 			if ui.Button(c, "Stop").Clicked() {
-				st.mu.Lock()
-				sid := st.active
-				st.mu.Unlock()
-				go func() { _ = st.sessions.Interrupt(st.ctx, sid) }()
+				go func() { _ = st.sessions.Interrupt(st.ctx, active) }()
 			}
 		}
-		labels := []string{"Diff", "None"}
-		if ui.Segmented(c, &tab, labels...).Changed() {
+		if status != "" {
+			ui.Text(c, status).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+		}
+		labels := []string{"Panel", "Hidden"}
+		ui.Segmented(c, &tab, labels...).Changed()
+		if tab != st.tab {
 			st.mu.Lock()
 			st.tab = tab
 			st.mu.Unlock()
@@ -308,46 +403,70 @@ func (st *state) toolbar(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// chat renders the message list.
+// chat renders the message list, or the centered empty state.
 func (st *state) chat(c *ui.Context, t *ui.Theme) {
 	st.mu.Lock()
 	msgs := append([]message(nil), st.messages...)
 	st.mu.Unlock()
 
+	if len(msgs) == 0 {
+		ui.Column(c).Grow(1).FillWidth().Center().Gap(10).Children(func() {
+			ui.Text(c, "*").FontSize(28).TextColor(t.Accent)
+			ui.Text(c, "What should we build?").FontSize(22).Bold()
+			ui.Text(c, "Type below, or ask on your phone.").TextColor(t.TextMuted)
+		})
+		return
+	}
+
 	ui.List(c, &st.chatList, len(msgs), func(i int) {
 		m := msgs[i]
-		ui.Column(c).Gap(4).Padding(8, 12).Children(func() {
-			label := "You"
-			if m.Role == "assistant" {
-				label = "Assistant"
-			}
-			ui.Text(c, label).FontSize(11).Bold().TextColor(t.TextMuted)
-			if m.Role == "assistant" {
+		if m.Role == "assistant" {
+			ui.Column(c).FillWidth().Padding(10, 24).Children(func() {
 				if m.Done {
 					markdown.View(c, m.Text, &st.md)
 				} else {
 					markdown.Stream(c, m.Text, &st.md)
 				}
-			} else {
-				ui.Text(c, m.Text).Selectable()
-			}
-		})
-	}).Grow(1).Gap(8).Children(func() {
-		if len(msgs) == 0 {
-			ui.Text(c, "Type a prompt below to start.").TextColor(t.TextMuted).Padding(16)
+			})
+			return
 		}
-	})
+		// The user's own message: a right-aligned rounded bubble.
+		ui.Row(c).FillWidth().Justify(ui.End).Padding(10, 24).Children(func() {
+			ui.Column(c).Radius(14).Padding(10, 14).MaxWidth(560).
+				Background(t.Surface).Border(1, t.Border).Children(func() {
+				ui.Text(c, m.Text).Wrap().Selectable().FillWidth()
+			})
+		})
+	}).Grow(1).Gap(4).Justify(ui.End)
 }
 
-// composer is the prompt input row.
-func (st *state) composer(c *ui.Context) {
-	ui.Row(c).Gap(8).Padding(12).AlignItems(ui.Center).Children(func() {
-		input := ui.TextInput(c, &st.prompt).Placeholder("Ask opencode…").Grow(1)
-		send := st.send
-		input.OnSubmit(send)
-		if ui.PrimaryButton(c, "Send").Clicked() {
-			send()
-		}
+// composer is the large rounded input card with the model/access chips,
+// as the reference app's.
+func (st *state) composer(c *ui.Context, t *ui.Theme) {
+	ui.Column(c).Padding(12, 24, 20).Children(func() {
+		box := card(c, t).Gap(10)
+		box.Children(func() {
+			input := ui.TextInput(c, &st.prompt).
+				Placeholder("Do anything…").FillWidth()
+			input.OnSubmit(st.send)
+
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				model := "deepseek-v4-1-flash"
+				if st.modelName != "" {
+					model = st.modelName
+				}
+				ui.Row(c).Radius(999).Padding(3, 10).Gap(6).Background(t.Background).Border(1, t.Border).Children(func() {
+					ui.Text(c, model).FontSize(12).TextColor(t.TextMuted)
+				})
+				ui.Row(c).Radius(999).Padding(3, 10).Gap(6).Background(t.Background).Border(1, t.Border).Children(func() {
+					ui.Text(c, "Full access").FontSize(12).TextColor(t.TextMuted)
+				})
+				ui.Spacer(c)
+				if ui.PrimaryButton(c, "↑").Clicked() {
+					st.send()
+				}
+			})
+		})
 	})
 }
 
@@ -379,71 +498,92 @@ func (st *state) send() {
 	}()
 }
 
-// inspector shows the changed files of the active session and the diff of
-// the chosen one.
-func (st *state) inspector(c *ui.Context, t *ui.Theme) {
+// panel is the right pane: the session's changes, or the "open a surface"
+// chooser when there are none.
+func (st *state) panel(c *ui.Context, t *ui.Theme) {
 	st.mu.Lock()
 	diffs := append([]opencode.FileDiff(nil), st.diffs...)
 	chosen := st.diffFile
 	st.mu.Unlock()
 
-	ui.Textf(c, "Changes (%d)", len(diffs)).Bold().Padding(12, 12, 4)
 	if len(diffs) == 0 {
-		ui.Text(c, "No changes in this session.").TextColor(t.TextMuted).Padding(12)
+		ui.Column(c).FillWidth().FillHeight().Padding(32).Gap(4).
+			AlignItems(ui.Start).Children(func() {
+			ui.Text(c, "Open a surface").Bold()
+			ui.Text(c, "Choose what to show in this panel").
+				FontSize(12).TextColor(t.TextMuted)
+			ui.Row(c).Gap(10).Padding(20, 0, 0).Children(func() {
+				tile(c, t, "Files", "Browse the workspace")
+				tile(c, t, "Review", "Review file changes")
+			})
+		})
 		return
 	}
 
-	// File list, newest state first.
-	ui.List(c, nil, len(diffs), func(i int) {
-		d := diffs[i]
-		row := ui.Row(c).Gap(8).Padding(4, 12).AlignItems(ui.Center)
-		row.Children(func() {
-			mark := "±"
-			switch d.Status {
-			case "added":
-				mark = "+"
-			case "deleted":
-				mark = "−"
-			}
-			ui.Text(c, mark).Bold()
-			ui.Text(c, shortPath(d.File)).Grow(1)
-			ui.Textf(c, "+%d −%d", d.Additions, d.Deletions).FontSize(11).TextColor(t.TextMuted)
+	ui.Column(c).FillWidth().FillHeight().Gap(8).Padding(12).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Textf(c, "Changes (%d)", len(diffs)).Bold()
 		})
-		if row.Clicked() {
-			st.mu.Lock()
-			st.diffFile = d.File
-			st.diffState = nil // rebuild below
-			st.mu.Unlock()
-		}
-		if d.File == chosen {
-			row.Background(t.Selection)
-		}
-	}).MaxHeight(160)
+		ui.List(c, nil, len(diffs), func(i int) {
+			d := diffs[i]
+			row := ui.Row(c).Gap(8).Padding(6, 10).Radius(8).AlignItems(ui.Center)
+			row.Children(func() {
+				mark := "±"
+				if d.Status == "added" {
+					mark = "+"
+				} else if d.Status == "deleted" {
+					mark = "−"
+				}
+				ui.Text(c, mark).Bold()
+				ui.Text(c, shortPath(d.File)).Grow(1)
+				ui.Textf(c, "+%d −%d", d.Additions, d.Deletions).
+					FontSize(11).TextColor(t.TextMuted)
+			})
+			if row.Clicked() {
+				st.mu.Lock()
+				st.diffFile = d.File
+				st.diffState = nil
+				st.mu.Unlock()
+			}
+			if d.File == chosen {
+				row.Background(t.Surface)
+			}
+		}).MaxHeight(140)
 
-	// The diff of the chosen file.
-	st.mu.Lock()
-	idx := 0
-	for i, d := range diffs {
-		if d.File == st.diffFile {
-			idx = i
-		}
-	}
-	if st.diffState == nil {
-		if fs, err := editor.ParsePatch(diffs[idx].Patch); err == nil && len(fs) > 0 {
-			ds := &editor.DiffState{}
-			ds.SetPatch(fs[0])
-			st.diffState = ds
-		}
-	}
-	ds := st.diffState
-	st.mu.Unlock()
+		ui.Divider(c)
 
-	ui.Divider(c)
-	if ds != nil {
-		editor.DiffView(c, ds).Grow(1).FillWidth()
-	} else {
-		ui.Text(c, "Cannot render this patch.").TextColor(t.TextMuted).Padding(12)
-	}
+		st.mu.Lock()
+		idx := 0
+		for i, d := range diffs {
+			if d.File == st.diffFile {
+				idx = i
+			}
+		}
+		if st.diffState == nil {
+			if fs, err := editor.ParsePatch(diffs[idx].Patch); err == nil && len(fs) > 0 {
+				ds := &editor.DiffState{}
+				ds.SetPatch(fs[0])
+				st.diffState = ds
+			}
+		}
+		ds := st.diffState
+		st.mu.Unlock()
+
+		if ds != nil {
+			editor.DiffView(c, ds).Grow(1).FillWidth()
+		} else {
+			ui.Text(c, "Cannot render this patch.").TextColor(t.TextMuted)
+		}
+	})
+}
+
+// tile is one choice of the surface chooser.
+func tile(c *ui.Context, t *ui.Theme, title, desc string) {
+	ui.Column(c).Width(170).Radius(14).Padding(14).Gap(4).
+		Background(t.Surface).Border(1, t.Border).Children(func() {
+		ui.Text(c, title).Bold()
+		ui.Text(c, desc).FontSize(12).TextColor(t.TextMuted)
+	})
 }
 
 // shortPath trims a long path to its last two segments.
