@@ -156,7 +156,7 @@ func (st *state) settingsNav(c *ui.Context, t *ui.Theme) {
 				if ui.Button(c, "← Back").FillWidth().Clicked() {
 					st.set.open = false
 				}
-				ui.TextInput(c, &st.set.search).Placeholder("Search Settings").FillWidth()
+				ui.SearchField(c, &st.set.search).Label("Search Settings").FillWidth()
 			})
 			ui.Column(c).Gap(2).Padding(6, 8).Children(func() {
 				for i, name := range sectionNames {
@@ -192,8 +192,10 @@ func settingsCard(c *ui.Context, t *ui.Theme, fn func()) {
 		Background(t.Surface).Children(fn)
 }
 
-// settingsRow is a label + description on the left, a control on the right.
-// The label is semibold (600), not bold, so a page of rows stays calm.
+// settingsRow is one row of a settings card: the label and its description on
+// the left, the control on the right, as the reference app lays them out. It
+// is a plain row rather than ui.Form, whose labels sit in a column of their
+// own, which is a different shape from the reference.
 func settingsRow(c *ui.Context, t *ui.Theme, title, desc string, control func()) {
 	ui.Row(c).FillWidth().Gap(16).AlignItems(ui.Center).Padding(10, 0).Children(func() {
 		ui.Column(c).Grow(1).Gap(2).Children(func() {
@@ -393,7 +395,7 @@ func (st *state) sectionSkills(c *ui.Context, t *ui.Theme) {
 	ui.Row(c).FillWidth().FillHeight().Gap(16).Children(func() {
 		// Middle list.
 		ui.Column(c).Width(300).FillHeight().Children(func() {
-			ui.TextInput(c, &st.set.skillQuery).Placeholder("Search skills…").FillWidth()
+			ui.SearchField(c, &st.set.skillQuery).Label("Search skills").FillWidth()
 			ui.Select(c, &st.set.skillFilter, []string{"All skills", "User skills", "Shared skills"}).
 				FillWidth()
 			ui.Textf(c, "%d skills", len(st.set.skills)).

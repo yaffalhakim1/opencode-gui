@@ -303,7 +303,7 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 				if ui.PrimaryButton(c, "New session").FillWidth().Clicked() {
 					go st.newSession()
 				}
-				ui.TextInput(c, &st.filter).Placeholder("Filter sessions").FillWidth()
+				ui.SearchField(c, &st.filter).Label("Filter sessions").FillWidth()
 			})
 
 			ui.Scroll(c).Grow(1).Children(func() {

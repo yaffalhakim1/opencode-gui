@@ -338,51 +338,46 @@ func (st *state) loadModels() {
 	}()
 }
 
-// modelPicker is the full searchable list, opened from the model menu.
+// modelPicker is the full searchable list, opened from the model menu. It
+// uses the framework's combobox, which already filters as the user types.
 func (st *state) modelPicker(c *ui.Context, t *ui.Theme) {
 	st.mu.Lock()
 	open := st.modelPickerOpen
 	models := append([]opencode.Model(nil), st.models...)
-	query := st.modelQuery
 	st.mu.Unlock()
+	if !open {
+		return
+	}
 
+	// Only the enabled models, as "name (provider)" so the combobox's text
+	// filter matches either.
+	labels := make([]string, 0, len(models))
+	byLabel := make(map[string]opencode.Model, len(models))
+	for _, m := range models {
+		if !m.Enabled {
+			continue
+		}
+		label := m.Name
+		if _, dup := byLabel[label]; dup {
+			label = m.Name + " (" + m.ProviderID + ")"
+		}
+		labels = append(labels, label)
+		byLabel[label] = m
+	}
+
+	chosen := st.modelName
 	ui.Modal(c, &st.modelPickerOpen, func() {
-		ui.Column(c).Width(560).Gap(10).Children(func() {
-			ui.Textf(c, "Models (%d)", len(models)).FontSize(13.5).FontWeight(500)
-			ui.TextInput(c, &st.modelQuery).Placeholder("Search models…").AutoFocus().FillWidth()
-			ui.Scroll(c).MaxHeight(360).Children(func() {
-				ui.Column(c).Gap(2).Children(func() {
-					shown := 0
-					for _, m := range models {
-						if !m.Enabled {
-							continue
-						}
-						if query != "" &&
-							!strings.Contains(strings.ToLower(m.Name), strings.ToLower(query)) &&
-							!strings.Contains(strings.ToLower(m.ID), strings.ToLower(query)) {
-							continue
-						}
-						shown++
-						row := ui.Row(c).Radius(7).Padding(6, 8).Gap(8).AlignItems(ui.Center)
-						row.Children(func() {
-							ui.Text(c, m.Name).Grow(1).MaxLines(1).Ellipsis("…")
-							ui.Text(c, m.ProviderID).FontSize(11).TextColor(t.TextMuted)
-						})
-						if row.Hovered() {
-							row.Background(itemBg(t))
-						}
-						if row.Clicked() {
-							st.chooseModel(m)
-						}
-					}
-					if shown == 0 {
-						ui.Text(c, "No models match.").FontSize(12.5).TextColor(t.TextMuted).Padding(8)
-					}
-				})
-			})
+		ui.Column(c).Width(520).Gap(10).Children(func() {
+			ui.Textf(c, "Models (%d)", len(labels)).FontSize(13.5).FontWeight(500)
+			if ui.Combobox(c, &chosen, labels).Label("Model").AutoFocus().FillWidth().Changed() {
+				if m, ok := byLabel[chosen]; ok {
+					st.chooseModel(m)
+				}
+			}
+			ui.Text(c, "Type to filter, then choose with Enter.").
+				FontSize(12.5).TextColor(t.TextMuted)
 		})
 	})
-	_ = open
 }
 
 // chooseModel switches the session to a model.
