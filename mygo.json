@@ -1,0 +1,6 @@
+{
+  "name": "OpenCode GUI",
+  "identifier": "dev.yafit.opencodegui",
+  "version": "0.1.0",
+  "out": "build"
+}
