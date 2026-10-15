@@ -2,19 +2,31 @@
 
 Budget: unlimited credits, 5 calendar days. Scope is frozen at the bottom of each day; anything unfinished rolls to the Android repo's backlog, not into the next day.
 
-## Day 1 — Skeleton + round-trip
-- `mygo init -template native opencode-gui` (pure Go, package `ui`)
-- `internal/opencode`: spawn `opencode serve --port 4096` as child process, poll `/global/health`, clean shutdown
-- `internal/app`: service methods — list, create, prompt (sync round-trip), called directly by the view
-- GUI: sidebar session list + prompt `ui.Text` input + plain `ui.Text` response
-- **Done when:** you type in the desktop app and get an answer.
+## Verified API facts (from docs, not guesses)
+
+- Shared service: `opencode service start/status/restart`; registers at `~/.local/state/opencode/service.json` with `{url, pid, password}`
+- Auth: `Basic opencode:<password from service.json>` on every request
+- Health: `GET /api/info` → `{version, pid, urls, capabilities}`
+- Prompt: `POST /api/session/{id}/prompt` `{text}` — **async**, reply arrives in messages
+- Messages: `GET /api/session/{id}/message` → `{data: [{type: "assistant"|"user", content: [{type:"text",text}]}]}` (no `role`/`parts` — v1 shapes are gone)
+- Responses wrapped in `{data: ...}` envelopes
+- Events: `GET /api/event` (SSE)
+- Interrupt: `POST /api/session/{id}/interrupt`
+- Debug tool: `opencode api get /api/info` (CLI does discovery+auth for you)
+- Pairing (for Android later): `POST /api/pair` creates a code; `GET /auth/connect/{code}` returns a session token as password
+
+## Day 1 — Skeleton + round-trip ✅
+- ~~`mygo init -template native opencode-gui`~~ done
+- ~~attach to registered opencode service (docs: client/service model)~~ done
+- ~~CreateSession + Prompt + poll Messages round-trip~~ **verified: ROUNDTRIP-OK**
+- ~~GUI: sidebar session list + prompt input + reply~~ wired (markdown replies)
 
 ## Day 2 — Streaming chat
-- `internal/opencode/events.go`: SSE consumer of `/event`, reconnected on drop
-- Fan-out: Go typed events to frontend (`mygo.NewEvent`)
-- Chat view: streaming parts (text / tool calls / steps), markdown + code highlight
-- Session switch, new session, abort, `session.idle` stops the spinner
-- **Done when:** streaming feels live and abort works.
+- SSE consumer of `/api/event`, reconnect on drop
+- Update GUI state from SSE (no polling): message parts appended live
+- Markdown streaming (mygo `markdown.Stream`), session switch, new session, interrupt button
+- **Read first:** https://mygo.egoist.dev/docs/windows (Windows window options, taskbar, DIPs) before finalizing window code
+- **Done when:** streaming feels live and interrupt works.
 
 ## Day 3 — Daemon
 - `internal/daemon`: WS server `:9680`, token auth (Secrets store, constant-time compare), protocol dispatcher per `docs/PROTOCOL.md`
