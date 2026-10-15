@@ -278,19 +278,19 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme) {
 							continue
 						}
 						shown++
-						row := ui.Row(c).Height(sessionRowHeight).Radius(7).
-							Padding(0, 10).Gap(8).AlignItems(ui.Center)
+						row := ui.Row(c).Radius(7).Padding(7, 10).Gap(6).
+							AlignItems(ui.Center)
 						row.Children(func() {
-							ui.Text(c, truncate(title, 30)).Grow(1).MaxLines(1).Ellipsis("…")
+							ui.Text(c, truncate(title, 30)).FontSize(13.5).Grow(1).MaxLines(1).Ellipsis("…")
 							if s.ID == sel {
 								ui.Text(c, "•").TextColor(t.Accent)
 							}
 						})
 						if row.Hovered() {
-							row.Background(t.SurfaceHover)
+							row.Background(itemBg(t))
 						}
 						if s.ID == sel {
-							row.Background(t.Surface)
+							row.Background(itemBg(t))
 						}
 						if row.Clicked() {
 							st.selectSession(s.ID)
@@ -410,7 +410,7 @@ func (st *state) toolbar(c *ui.Context, t *ui.Theme) {
 			}
 		}
 		st.mu.Unlock()
-		ui.Text(c, truncate(title, 48)).FontWeight(600).MaxLines(1)
+		ui.Text(c, truncate(title, 48)).FontSize(13.5).FontWeight(500).MaxLines(1)
 		ui.Spacer(c)
 		if running {
 			ui.Spinner(c)
@@ -481,8 +481,8 @@ func (st *state) composer(c *ui.Context, t *ui.Theme) {
 	ui.Row(c).FillWidth().Justify(ui.Center).
 		Padding(0, composerPadX, composerPadY).Children(func() {
 		ui.Column(c).Width(contentMaxWidth).Children(func() {
-			box := ui.Column(c).Radius(composerRadius).Padding(composerPadInner).
-				Background(t.Background).Border(1, t.Border).Gap(9)
+			box := ui.Column(c).Radius(composerRadius).Padding(composerPadInner, 10).
+				Background(composerBg(t)).Border(1, t.Border).Gap(8)
 			box.Children(func() {
 				input := ui.TextInput(c, &st.prompt).
 					Placeholder("Do anything…").FillWidth()

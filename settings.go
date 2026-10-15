@@ -13,6 +13,9 @@ import (
 	"opencode-gui/internal/opencode"
 )
 
+// settingsContentMaxWidth is the settings column's width (SETTINGS_CONTENT_MAX_WIDTH).
+const settingsContentMaxWidth = 760
+
 // Settings section identifiers, in nav order.
 const (
 	secGeneral = iota
@@ -114,23 +117,27 @@ func (st *state) settingsView(c *ui.Context, t *ui.Theme) {
 		st.settingsNav(c, t)
 		ui.Column(c).Grow(1).FillHeight().Background(t.Background).Children(func() {
 			ui.Scroll(c).Grow(1).Children(func() {
-				ui.Column(c).FillWidth().Padding(40, 48).Gap(20).Children(func() {
-					switch st.set.section {
-					case secGeneral:
-						st.sectionGeneral(c, t)
-					case secAppearance:
-						st.sectionAppearance(c, t)
-					case secProviders:
-						st.sectionProviders(c, t)
-					case secSkills:
-						st.sectionSkills(c, t)
-					case secMemory:
-						st.sectionMemory(c, t)
-					case secUsage:
-						st.sectionUsage(c, t)
-					case secDaemon:
-						st.sectionDaemon(c, t)
-					}
+				ui.Column(c).FillWidth().Padding(32, 32).Gap(15).Children(func() {
+					ui.Column(c).MaxWidth(settingsContentMaxWidth).Children(func() {
+						ui.Column(c).Gap(15).Children(func() {
+							switch st.set.section {
+							case secGeneral:
+								st.sectionGeneral(c, t)
+							case secAppearance:
+								st.sectionAppearance(c, t)
+							case secProviders:
+								st.sectionProviders(c, t)
+							case secSkills:
+								st.sectionSkills(c, t)
+							case secMemory:
+								st.sectionMemory(c, t)
+							case secUsage:
+								st.sectionUsage(c, t)
+							case secDaemon:
+								st.sectionDaemon(c, t)
+							}
+						})
+					})
 				})
 			})
 		})
@@ -179,7 +186,7 @@ func (st *state) settingsNav(c *ui.Context, t *ui.Theme) {
 
 // settingsCard is the raised card the sections use for their rows.
 func settingsCard(c *ui.Context, t *ui.Theme, fn func()) {
-	ui.Column(c).FillWidth().Radius(14).Padding(20, 20).
+	ui.Column(c).FillWidth().Radius(13).Padding(20, 14).
 		Background(t.Surface).Children(fn)
 }
 
@@ -188,9 +195,9 @@ func settingsCard(c *ui.Context, t *ui.Theme, fn func()) {
 func settingsRow(c *ui.Context, t *ui.Theme, title, desc string, control func()) {
 	ui.Row(c).FillWidth().Gap(16).AlignItems(ui.Center).Padding(10, 0).Children(func() {
 		ui.Column(c).Grow(1).Gap(2).Children(func() {
-			ui.Text(c, title).FontWeight(600)
+			ui.Text(c, title).FontSize(13.5).FontWeight(500)
 			if desc != "" {
-				ui.Text(c, desc).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, desc).FontSize(12.5).TextColor(t.TextMuted)
 			}
 		})
 		control()
@@ -199,7 +206,7 @@ func settingsRow(c *ui.Context, t *ui.Theme, title, desc string, control func())
 
 // sectionHeader is the page title, as "General".
 func sectionHeader(c *ui.Context, title string) {
-	ui.Text(c, title).FontSize(24).Bold()
+	ui.Text(c, title).FontSize(18).FontWeight(500)
 }
 
 func (st *state) sectionGeneral(c *ui.Context, t *ui.Theme) {
@@ -277,7 +284,7 @@ func providerSubtitle(a opencode.Agent) string {
 func (st *state) sectionMemory(c *ui.Context, t *ui.Theme) {
 	sectionHeader(c, "Memory")
 	settingsCard(c, t, func() {
-		ui.Text(c, "Project instructions").FontWeight(600)
+		ui.Text(c, "Project instructions").FontWeight(500)
 		ui.Text(c, "opencode reads AGENTS.md from the project root and applies it to every session.").
 			FontSize(12).TextColor(t.TextMuted)
 		ui.Row(c).Gap(8).Padding(12, 0, 0).Children(func() {
@@ -299,7 +306,7 @@ func (st *state) sectionDaemon(c *ui.Context, t *ui.Theme) {
 	})
 
 	settingsCard(c, t, func() {
-		ui.Text(c, "Listener access").FontWeight(600)
+		ui.Text(c, "Listener access").FontWeight(500)
 		ui.Text(c, "Clients reach this daemon over your Tailscale network.").
 			FontSize(12).TextColor(t.TextMuted)
 		ui.Row(c).FillWidth().Gap(16).AlignItems(ui.Center).Padding(10, 0).Children(func() {
@@ -312,7 +319,7 @@ func (st *state) sectionDaemon(c *ui.Context, t *ui.Theme) {
 	})
 
 	settingsCard(c, t, func() {
-		ui.Text(c, "Connection details").FontWeight(600)
+		ui.Text(c, "Connection details").FontWeight(500)
 		ui.Text(c, "Enter these in the phone app.").FontSize(12).TextColor(t.TextMuted)
 
 		ui.Row(c).FillWidth().Gap(16).AlignItems(ui.Center).Padding(10, 0).Children(func() {
@@ -341,7 +348,7 @@ func (st *state) sectionDaemon(c *ui.Context, t *ui.Theme) {
 	})
 
 	settingsCard(c, t, func() {
-		ui.Text(c, "Reach it from anywhere with Tailscale").FontWeight(600)
+		ui.Text(c, "Reach it from anywhere with Tailscale").FontWeight(500)
 		ui.Text(c, "Tailscale lets your phone reach this machine from any network, with no port forwarding.").
 			FontSize(12).TextColor(t.TextMuted)
 		ip := tailscaleHost()
@@ -435,7 +442,7 @@ func (st *state) skillDetail(c *ui.Context, t *ui.Theme) {
 
 	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Gap(2).Children(func() {
-			ui.Text(c, s.Name).FontSize(18).FontWeight(600)
+			ui.Text(c, s.Name).FontSize(18).FontWeight(500)
 			ui.Text(c, "Available in every project").FontSize(12).TextColor(t.TextMuted)
 		})
 		on := s.Autoinvoke
@@ -496,7 +503,7 @@ func (st *state) sectionUsage(c *ui.Context, t *ui.Theme) {
 	// Headline stats.
 	settingsCard(c, t, func() {
 		ui.Text(c, "Processed tokens").FontSize(11).TextColor(t.TextMuted)
-		ui.Text(c, humanTokens(totalTokens(u.Tokens))).FontSize(30).Bold()
+		ui.Text(c, humanTokens(totalTokens(u.Tokens))).FontSize(30).FontWeight(500)
 		ui.Textf(c, "Across %d sessions · %s", u.Sessions, humanCost(u.Cost)).
 			FontSize(12).TextColor(t.TextMuted)
 	})
@@ -514,7 +521,7 @@ func (st *state) sectionUsage(c *ui.Context, t *ui.Theme) {
 
 	// Per-model breakdown.
 	settingsCard(c, t, func() {
-		ui.Text(c, "Breakdown").FontWeight(600)
+		ui.Text(c, "Breakdown").FontWeight(500)
 		ui.Row(c).FillWidth().Gap(12).Padding(6, 0).Children(func() {
 			ui.Text(c, "Model").Grow(1).FontSize(11).TextColor(t.TextMuted)
 			ui.Text(c, "Cost").Width(90).FontSize(11).TextColor(t.TextMuted)
@@ -542,7 +549,7 @@ func (st *state) sectionUsage(c *ui.Context, t *ui.Theme) {
 func stat(c *ui.Context, t *ui.Theme, label, value, sub string) {
 	ui.Column(c).Grow(1).Gap(2).Children(func() {
 		ui.Text(c, label).FontSize(11).TextColor(t.TextMuted)
-		ui.Text(c, value).FontSize(18).Bold()
+		ui.Text(c, value).FontSize(18).FontWeight(500)
 		if sub != "" {
 			ui.Text(c, sub).FontSize(11).TextColor(t.TextMuted)
 		}

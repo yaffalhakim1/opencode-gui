@@ -26,7 +26,7 @@ const (
 	// Composer.
 	composerPadX     = 20
 	composerPadY     = 8
-	composerRadius   = 12
+	composerRadius   = 13
 	composerPadInner = 12
 	chipHeight       = 26
 	chipRadius       = 6
@@ -104,6 +104,24 @@ func sidebarColor(t *ui.Theme) ui.Color {
 		return ui.Hex("#181818")
 	}
 	return ui.Hex("#F3F3F3")
+}
+
+// itemBg is the 6% neutral layer the reference app paints on hovered,
+// selected and pressed sidebar rows (sidebar_item_background).
+func itemBg(t *ui.Theme) ui.Color {
+	if t.Dark {
+		return ui.RGBA(240, 240, 240, 0.06)
+	}
+	return ui.RGBA(20, 20, 20, 0.06)
+}
+
+// composerBg is the composer card's surface: white in the light theme,
+// a touch above the canvas (#212121 in dark), as the reference app's.
+func composerBg(t *ui.Theme) ui.Color {
+	if t.Dark {
+		return ui.Hex("#212121")
+	}
+	return ui.Hex("#FFFFFF")
 }
 
 // card styles a container as the reference app's raised panel.
