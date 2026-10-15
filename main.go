@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -51,6 +52,7 @@ type state struct {
 	diffFile      string
 	filter        string
 	modelName     string
+	set           settings
 	ctx           context.Context
 	cancelSession context.CancelFunc
 }
@@ -90,6 +92,11 @@ func main() {
 			StateKey:  "main",
 			Content:   ui.View(st.view),
 		})
+		// OPENCODE_GUI_SETTINGS opens the Settings page at launch, for
+		// development and screenshots.
+		if os.Getenv("OPENCODE_GUI_SETTINGS") != "" {
+			st.openSettings()
+		}
 		st.startWatch()
 	})
 	if err := mygo.App.Run(); err != nil {
@@ -210,6 +217,11 @@ func (st *state) view(c *ui.Context) {
 	t := kerenzikovTheme(c.Theme().Dark)
 	c.SetTheme(t)
 
+	if st.set.open {
+		st.settingsView(c, t)
+		return
+	}
+
 	ui.Row(c).FillWidth().FillHeight().AlignItems(ui.Stretch).Children(func() {
 		// ── Sidebar ──────────────────────────────────────────────
 		st.sidebar(c, t)
@@ -299,6 +311,9 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme) {
 				if ui.Button(c, "Copy connect URL").FillWidth().Clicked() {
 					mygo.Clipboard.WriteText(st.daemonURL)
 					st.status = "connect URL copied"
+				}
+				if ui.Button(c, "Settings").FillWidth().Clicked() {
+					st.openSettings()
 				}
 			})
 		})

@@ -108,6 +108,24 @@ func (s *Sessions) Messages(ctx context.Context, sessionID string) ([]opencode.M
 	return srv.Messages(ctx, sessionID)
 }
 
+// Skills lists the agent skills.
+func (s *Sessions) Skills(ctx context.Context) ([]opencode.Skill, error) {
+	srv, err := s.server()
+	if err != nil {
+		return nil, err
+	}
+	return srv.Skills(ctx)
+}
+
+// Usage returns aggregate activity for a range.
+func (s *Sessions) Usage(ctx context.Context, from, to int64) (opencode.Stats, error) {
+	srv, err := s.server()
+	if err != nil {
+		return opencode.Stats{}, err
+	}
+	return srv.Usage(ctx, from, to)
+}
+
 // Agents lists the registered agents.
 func (s *Sessions) Agents(ctx context.Context) ([]opencode.Agent, error) {
 	srv, err := s.server()
