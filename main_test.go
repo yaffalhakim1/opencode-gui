@@ -45,3 +45,41 @@ func TestSendIgnoresEmptyPrompt(t *testing.T) {
 		t.Error("empty prompt should not start a run")
 	}
 }
+
+func TestPanelToggles(t *testing.T) {
+	st := &state{
+		sessions:     &app.Sessions{},
+		sidebarWidth: sidebarWidthDefault,
+		ctx:          context.Background(),
+		tab:          0,
+	}
+	tt := ui.NewTester(st.view, 1280, 800)
+
+	// Collapse the left panel.
+	if err := tt.Click("◧"); err != nil {
+		t.Fatalf("click left toggle: %v", err)
+	}
+	if !st.leftCollapsed {
+		t.Error("left panel did not collapse")
+	}
+	if !tt.HasText("▣") {
+		t.Errorf("left glyph did not change, texts %q", tt.Texts())
+	}
+
+	// Collapse the right panel.
+	if err := tt.Click("◨"); err != nil {
+		t.Fatalf("click right toggle: %v", err)
+	}
+	if !st.rightCollapsed {
+		t.Error("right panel did not collapse")
+	}
+
+	// Expand both again.
+	tt2 := ui.NewTester(st.view, 1280, 800)
+	if err := tt2.Click("▣"); err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	if st.leftCollapsed {
+		t.Error("left panel did not expand")
+	}
+}

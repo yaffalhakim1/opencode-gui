@@ -184,10 +184,11 @@ func settingsCard(c *ui.Context, t *ui.Theme, fn func()) {
 }
 
 // settingsRow is a label + description on the left, a control on the right.
+// The label is semibold (600), not bold, so a page of rows stays calm.
 func settingsRow(c *ui.Context, t *ui.Theme, title, desc string, control func()) {
 	ui.Row(c).FillWidth().Gap(16).AlignItems(ui.Center).Padding(10, 0).Children(func() {
 		ui.Column(c).Grow(1).Gap(2).Children(func() {
-			ui.Text(c, title).Bold()
+			ui.Text(c, title).FontWeight(600)
 			if desc != "" {
 				ui.Text(c, desc).FontSize(12).TextColor(t.TextMuted)
 			}
@@ -276,7 +277,7 @@ func providerSubtitle(a opencode.Agent) string {
 func (st *state) sectionMemory(c *ui.Context, t *ui.Theme) {
 	sectionHeader(c, "Memory")
 	settingsCard(c, t, func() {
-		ui.Text(c, "Project instructions").Bold()
+		ui.Text(c, "Project instructions").FontWeight(600)
 		ui.Text(c, "opencode reads AGENTS.md from the project root and applies it to every session.").
 			FontSize(12).TextColor(t.TextMuted)
 		ui.Row(c).Gap(8).Padding(12, 0, 0).Children(func() {
@@ -298,7 +299,7 @@ func (st *state) sectionDaemon(c *ui.Context, t *ui.Theme) {
 	})
 
 	settingsCard(c, t, func() {
-		ui.Text(c, "Listener access").Bold()
+		ui.Text(c, "Listener access").FontWeight(600)
 		ui.Text(c, "Clients reach this daemon over your Tailscale network.").
 			FontSize(12).TextColor(t.TextMuted)
 		ui.Row(c).FillWidth().Gap(16).AlignItems(ui.Center).Padding(10, 0).Children(func() {
@@ -311,7 +312,7 @@ func (st *state) sectionDaemon(c *ui.Context, t *ui.Theme) {
 	})
 
 	settingsCard(c, t, func() {
-		ui.Text(c, "Connection details").Bold()
+		ui.Text(c, "Connection details").FontWeight(600)
 		ui.Text(c, "Enter these in the phone app.").FontSize(12).TextColor(t.TextMuted)
 
 		ui.Row(c).FillWidth().Gap(16).AlignItems(ui.Center).Padding(10, 0).Children(func() {
@@ -340,7 +341,7 @@ func (st *state) sectionDaemon(c *ui.Context, t *ui.Theme) {
 	})
 
 	settingsCard(c, t, func() {
-		ui.Text(c, "Reach it from anywhere with Tailscale").Bold()
+		ui.Text(c, "Reach it from anywhere with Tailscale").FontWeight(600)
 		ui.Text(c, "Tailscale lets your phone reach this machine from any network, with no port forwarding.").
 			FontSize(12).TextColor(t.TextMuted)
 		ip := tailscaleHost()
@@ -434,7 +435,7 @@ func (st *state) skillDetail(c *ui.Context, t *ui.Theme) {
 
 	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Gap(2).Children(func() {
-			ui.Text(c, s.Name).FontSize(18).Bold()
+			ui.Text(c, s.Name).FontSize(18).FontWeight(600)
 			ui.Text(c, "Available in every project").FontSize(12).TextColor(t.TextMuted)
 		})
 		on := s.Autoinvoke
@@ -513,7 +514,7 @@ func (st *state) sectionUsage(c *ui.Context, t *ui.Theme) {
 
 	// Per-model breakdown.
 	settingsCard(c, t, func() {
-		ui.Text(c, "Breakdown").Bold()
+		ui.Text(c, "Breakdown").FontWeight(600)
 		ui.Row(c).FillWidth().Gap(12).Padding(6, 0).Children(func() {
 			ui.Text(c, "Model").Grow(1).FontSize(11).TextColor(t.TextMuted)
 			ui.Text(c, "Cost").Width(90).FontSize(11).TextColor(t.TextMuted)

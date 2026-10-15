@@ -43,18 +43,20 @@ type state struct {
 	running bool
 	tab     int // inspector tab: 0 diff, 1 files
 
-	sidebarWidth  float32
-	chatList      ui.ListState
-	md            markdown.Options
-	diffState     *editor.DiffState
-	daemon        *daemon.Daemon
-	daemonURL     string
-	diffFile      string
-	filter        string
-	modelName     string
-	set           settings
-	ctx           context.Context
-	cancelSession context.CancelFunc
+	sidebarWidth   float32
+	chatList       ui.ListState
+	md             markdown.Options
+	diffState      *editor.DiffState
+	daemon         *daemon.Daemon
+	daemonURL      string
+	diffFile       string
+	filter         string
+	modelName      string
+	set            settings
+	leftCollapsed  bool
+	rightCollapsed bool
+	ctx            context.Context
+	cancelSession  context.CancelFunc
 }
 
 func main() {
@@ -223,8 +225,10 @@ func (st *state) view(c *ui.Context) {
 	}
 
 	ui.Row(c).FillWidth().FillHeight().AlignItems(ui.Stretch).Children(func() {
-		// ── Sidebar ──────────────────────────────────────────────
-		st.sidebar(c, t)
+		// ── Sidebar (collapsible) ────────────────────────────────
+		if !st.leftCollapsed {
+			st.sidebar(c, t)
+		}
 
 		// ── Chat ─────────────────────────────────────────────────
 		ui.Column(c).Grow(1).FillHeight().Children(func() {
@@ -233,8 +237,8 @@ func (st *state) view(c *ui.Context) {
 			st.composer(c, t)
 		})
 
-		// ── Right panel ──────────────────────────────────────────
-		if st.tab >= 0 {
+		// ── Right panel (collapsible) ────────────────────────────
+		if st.tab >= 0 && !st.rightCollapsed {
 			ui.Column(c).Width(panelWidthDefault).FillHeight().
 				Background(t.Background).
 				BorderWidth(0, 0, 0, 1).BorderColor(t.Border).
@@ -384,12 +388,20 @@ func (st *state) toolbar(c *ui.Context, t *ui.Theme) {
 	st.mu.Lock()
 	running := st.running
 	status := st.status
-	tab := st.tab
 	active := st.active
 	st.mu.Unlock()
 
-	ui.Row(c).Gap(10).Padding(10, 16).AlignItems(ui.Center).Height(48).
+	ui.Row(c).Gap(10).Padding(10, 12).AlignItems(ui.Center).Height(48).
 		BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
+		// Top-left: expand/collapse the left panel.
+		leftGlyph := "◧"
+		if st.leftCollapsed {
+			leftGlyph = "▣"
+		}
+		if ui.Button(c, leftGlyph).Width(32).Clicked() {
+			st.leftCollapsed = !st.leftCollapsed
+		}
+
 		title := "New task"
 		st.mu.Lock()
 		for _, s := range st.sessionsList {
@@ -398,7 +410,7 @@ func (st *state) toolbar(c *ui.Context, t *ui.Theme) {
 			}
 		}
 		st.mu.Unlock()
-		ui.Text(c, truncate(title, 48)).Bold().MaxLines(1)
+		ui.Text(c, truncate(title, 48)).FontWeight(600).MaxLines(1)
 		ui.Spacer(c)
 		if running {
 			ui.Spinner(c)
@@ -409,12 +421,15 @@ func (st *state) toolbar(c *ui.Context, t *ui.Theme) {
 		if status != "" {
 			ui.Text(c, status).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
 		}
-		labels := []string{"Panel", "Hidden"}
-		ui.Segmented(c, &tab, labels...).Changed()
-		if tab != st.tab {
-			st.mu.Lock()
-			st.tab = tab
-			st.mu.Unlock()
+
+		// Top-right: expand/collapse the right panel.
+		rightGlyph := "◨"
+		if st.rightCollapsed {
+			rightGlyph = "▣"
+		}
+		if ui.Button(c, rightGlyph).Width(32).Clicked() {
+			st.tab = 0
+			st.rightCollapsed = !st.rightCollapsed
 		}
 	})
 }
