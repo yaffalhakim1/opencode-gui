@@ -33,14 +33,14 @@ func TestViewRendersMessages(t *testing.T) {
 	}
 }
 
-func TestSendIgnoresEmptyPrompt(t *testing.T) {
+func TestSubmitIgnoresEmptyPrompt(t *testing.T) {
 	st := &state{
 		sessions: &app.Sessions{},
 		ctx:      context.Background(),
 		tab:      1,
 	}
 	st.prompt = "   "
-	st.send() // must not panic or block
+	st.submit() // must not panic or block
 	if st.running {
 		t.Error("empty prompt should not start a run")
 	}

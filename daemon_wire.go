@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"opencode-gui/internal/opencode"
 
 	"github.com/egoist/mygo"
 
@@ -47,7 +48,7 @@ func (st *state) startDaemon(ctx context.Context) {
 		if err := json.Unmarshal(p, &body); err != nil {
 			return nil, err
 		}
-		return true, st.sessions.Prompt(ctx, body.ID, body.Text)
+		return true, st.sessions.Prompt(ctx, body.ID, opencode.PromptInput{Text: body.Text})
 	})
 	d.Handle("session.interrupt", func(ctx context.Context, p json.RawMessage) (any, error) {
 		var body struct {

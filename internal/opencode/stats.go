@@ -5,12 +5,6 @@ import (
 	"fmt"
 )
 
-// ModelRef identifies a model.
-type ModelRef struct {
-	ID         string `json:"id"`
-	ProviderID string `json:"providerID"`
-}
-
 // TokenUsage is how many tokens a range used.
 type TokenUsage struct {
 	Input     float64 `json:"input"`
@@ -47,6 +41,13 @@ type Stats struct {
 	ActiveDays int          `json:"activeDays"`
 	Streak     int          `json:"streak"`
 	Models     []ModelUsage `json:"models"`
+	Activity   []Activity   `json:"activity"`
+}
+
+// Activity is one day's step count, per SessionStats.Activity.
+type Activity struct {
+	Date  string `json:"date"`
+	Steps int    `json:"steps"`
 }
 
 // Usage returns aggregate activity between two epoch-millisecond bounds.

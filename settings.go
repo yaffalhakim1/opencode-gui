@@ -8,6 +8,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/chart"
 
 	"opencode-gui/internal/daemon"
 	"opencode-gui/internal/opencode"
@@ -46,7 +47,7 @@ type settings struct {
 	skills      []opencode.Skill
 	skillsReady bool
 	skillQuery  string
-	skillFilter int // 0 all, 1 user, 2 shared
+	skillFilter string // the chosen filter label
 	skillSel    int
 
 	// Usage.
@@ -69,6 +70,7 @@ func (st *state) openSettings() {
 	st.set.uiFont = "14 px"
 	st.set.codeFont = "14 px"
 	st.set.daemonPort = "9680"
+	st.set.skillFilter = "All skills"
 	st.set.daemonExpose = true
 	st.loadSkills()
 }
@@ -392,13 +394,14 @@ func (st *state) sectionSkills(c *ui.Context, t *ui.Theme) {
 		// Middle list.
 		ui.Column(c).Width(300).FillHeight().Children(func() {
 			ui.TextInput(c, &st.set.skillQuery).Placeholder("Search skills…").FillWidth()
+			ui.Select(c, &st.set.skillFilter, []string{"All skills", "User skills", "Shared skills"}).
+				FillWidth()
 			ui.Textf(c, "%d skills", len(st.set.skills)).
 				FontSize(12).TextColor(t.TextMuted).Padding(8, 0)
 			ui.Scroll(c).Grow(1).Children(func() {
 				ui.Column(c).Gap(2).Children(func() {
 					for i, s := range st.set.skills {
-						if st.set.skillQuery != "" &&
-							!strings.Contains(strings.ToLower(s.Name), strings.ToLower(st.set.skillQuery)) {
+						if !skillMatches(s, st.set.skillQuery, st.set.skillFilter) {
 							continue
 						}
 						row := ui.Row(c).Height(48).Radius(7).Padding(6, 10).Gap(8).AlignItems(ui.Center)
@@ -430,6 +433,25 @@ func (st *state) sectionSkills(c *ui.Context, t *ui.Theme) {
 			})
 		})
 	})
+}
+
+// skillMatches reports whether a skill passes the search and the filter. A
+// built-in skill lives under /builtin/; the rest come from disk.
+func skillMatches(s opencode.Skill, query, filter string) bool {
+	if query != "" &&
+		!strings.Contains(strings.ToLower(s.Name), strings.ToLower(query)) &&
+		!strings.Contains(strings.ToLower(s.Description), strings.ToLower(query)) {
+		return false
+	}
+	builtin := strings.Contains(s.Path, "/builtin/")
+	switch filter {
+	case "User skills":
+		return !builtin
+	case "Shared skills":
+		return builtin
+	default: // All skills
+		return true
+	}
 }
 
 // skillDetail shows the chosen skill.
@@ -519,6 +541,17 @@ func (st *state) sectionUsage(c *ui.Context, t *ui.Theme) {
 		})
 	})
 
+	// Daily activity: an area chart of steps per day, as the reference app's
+	// "Daily processed tokens" plot.
+	if len(u.Activity) > 1 {
+		settingsCard(c, t, func() {
+			ui.Text(c, "Daily activity").FontSize(13.5).FontWeight(500)
+			ui.Text(c, "Steps per day across the range").
+				FontSize(12.5).TextColor(t.TextMuted)
+			activityChart(c, t, u.Activity)
+		})
+	}
+
 	// Per-model breakdown.
 	settingsCard(c, t, func() {
 		ui.Text(c, "Breakdown").FontWeight(500)
@@ -543,6 +576,43 @@ func (st *state) sectionUsage(c *ui.Context, t *ui.Theme) {
 			})
 		}
 	})
+}
+
+// activityChart draws steps per day as a filled area with a line on top, the
+// shape the reference app's usage plot has.
+func activityChart(c *ui.Context, t *ui.Theme, days []opencode.Activity) {
+	values := make([]float64, len(days))
+	labels := make([]string, len(days))
+	for i, d := range days {
+		values[i] = float64(d.Steps)
+		labels[i] = d.Date
+	}
+
+	_, hi := chart.Extent(values...)
+	y := chart.NewLinear(0, hi).Nice(4)
+	ticks := y.Ticks(4)
+
+	// Fractions along x for each day, and along y for each value.
+	n := len(values)
+	xs := make([]float32, n)
+	ys := make([]float32, n)
+	for i, v := range values {
+		if n > 1 {
+			xs[i] = float32(i) / float32(n-1)
+		}
+		ys[i] = y.At(v)
+	}
+
+	chart.Plot(c, chart.Axes{Left: ticks}, func(area ui.Element) {
+		area.Draw(func(p *ui.Painter, r ui.Rect) {
+			for _, tick := range ticks { // grid lines
+				p.Line(r.X, chart.Y(r, tick.At), r.X+r.W, chart.Y(r, tick.At), 1, t.Border)
+			}
+			// The filled area, then the line over it.
+			p.FillPath(chart.Area(r, xs, nil, ys, chart.CurveMonotone), t.Accent.Alpha(0.15))
+			p.StrokePath(chart.Line(r, xs, ys, chart.CurveMonotone), 2, t.Accent)
+		})
+	}).Label("Daily activity").Height(180).Gap(6)
 }
 
 // stat is one label + value + sub-line in the usage row.

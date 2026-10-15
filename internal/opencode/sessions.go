@@ -11,6 +11,19 @@ type envelope[T any] struct {
 type Session struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
+	Time  struct {
+		Created float64 `json:"created"`
+		Updated float64 `json:"updated"`
+		Idle    float64 `json:"idle"`
+	} `json:"time"`
+}
+
+// LastActivity is when the session was last touched, in epoch milliseconds.
+func (s Session) LastActivity() float64 {
+	if s.Time.Updated > 0 {
+		return s.Time.Updated
+	}
+	return s.Time.Created
 }
 
 // Message is one session message. v2 messages carry content blocks, not
@@ -54,10 +67,48 @@ func (s *Server) ListSessions(ctx context.Context) ([]Session, error) {
 	return out.Data, err
 }
 
-// Prompt admits text to a session. v2 prompts are async: the reply arrives
-// through the session's messages, not as this call's result.
-func (s *Server) Prompt(ctx context.Context, sessionID, text string) error {
-	body := map[string]any{"text": text}
+// FileAttachment is one file sent with a prompt, per
+// PromptInput.FileAttachment.
+type FileAttachment struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// Delivery says how a prompt reaches a running session: steer delivers it at
+// the next step boundary, queue holds it until the turn ends.
+type Delivery string
+
+const (
+	DeliverySteer Delivery = "steer"
+	DeliveryQueue Delivery = "queue"
+)
+
+// PromptInput is one message admitted to a session.
+type PromptInput struct {
+	Text     string
+	Agent    string
+	Files    []FileAttachment
+	Delivery Delivery
+	Resume   *bool
+}
+
+// Prompt admits a message to a session. v2 prompts are async: the reply
+// arrives through the session's messages, not as this call's result.
+func (s *Server) Prompt(ctx context.Context, sessionID string, in PromptInput) error {
+	body := map[string]any{"text": in.Text}
+	if in.Agent != "" {
+		body["agents"] = []string{in.Agent}
+	}
+	if len(in.Files) > 0 {
+		body["files"] = in.Files
+	}
+	if in.Delivery != "" {
+		body["delivery"] = string(in.Delivery)
+	}
+	if in.Resume != nil {
+		body["resume"] = *in.Resume
+	}
 	var out envelope[any]
 	return s.Post(ctx, "/api/session/"+sessionID+"/prompt", body, &out)
 }

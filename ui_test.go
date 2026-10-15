@@ -256,3 +256,102 @@ func TestUsageRangeProducesEpochMilliseconds(t *testing.T) {
 		t.Errorf("range bound drifted by %v", time.Duration(diff)*time.Millisecond)
 	}
 }
+
+func TestSessionGroupBucketsByRecency(t *testing.T) {
+	now := time.Now()
+	mk := func(when time.Time) opencode.Session {
+		var s opencode.Session
+		s.Time.Updated = float64(when.UnixMilli())
+		return s
+	}
+	cases := []struct {
+		when time.Time
+		want string
+	}{
+		{now, "Today"},
+		{now.AddDate(0, 0, -1), "Yesterday"},
+		{now.AddDate(0, 0, -3), "This Week"},
+		{now.AddDate(0, 0, -30), "Older"},
+	}
+	for _, c := range cases {
+		if got := sessionGroup(mk(c.when)); got != c.want {
+			t.Errorf("sessionGroup(%v) = %q, want %q", c.when.Format("2006-01-02"), got, c.want)
+		}
+	}
+}
+
+func TestSessionGroupWithoutATimestamp(t *testing.T) {
+	if got := sessionGroup(opencode.Session{}); got != "Sessions" {
+		t.Errorf("a session with no time = %q, want Sessions", got)
+	}
+}
+
+func TestSkillFilterSplitsBuiltinFromUser(t *testing.T) {
+	builtin := opencode.Skill{Name: "opencode", Path: "/builtin/opencode.md"}
+	user := opencode.Skill{Name: "my-skill", Path: `C:\Users\me\.config\opencode\skills\my-skill\SKILL.md`}
+
+	if !skillMatches(builtin, "", "All skills") {
+		t.Error("a builtin skill should pass the All filter")
+	}
+	if skillMatches(builtin, "", "User skills") {
+		t.Error("a builtin skill should not pass the User filter")
+	}
+	if !skillMatches(builtin, "", "Shared skills") {
+		t.Error("a builtin skill should pass the Shared filter")
+	}
+	if skillMatches(user, "", "Shared skills") {
+		t.Error("a user skill should not pass the Shared filter")
+	}
+	if !skillMatches(user, "", "User skills") {
+		t.Error("a user skill should pass the User filter")
+	}
+}
+
+func TestSkillSearchMatchesNameAndDescription(t *testing.T) {
+	s := opencode.Skill{Name: "anatomy", Description: "Isometric SVG figures"}
+	if !skillMatches(s, "ana", "All skills") {
+		t.Error("search should match the name")
+	}
+	if !skillMatches(s, "isometric", "All skills") {
+		t.Error("search should match the description")
+	}
+	if skillMatches(s, "zzz", "All skills") {
+		t.Error("search should not match unrelated text")
+	}
+}
+
+func TestPromptPlaceholderChangesWhileRunning(t *testing.T) {
+	if got := promptPlaceholder(false); got != "Ask OpenCode to build something…" {
+		t.Errorf("idle placeholder = %q", got)
+	}
+	if got := promptPlaceholder(true); got != "Queue a follow-up…" {
+		t.Errorf("running placeholder = %q, want the queue wording", got)
+	}
+}
+
+func TestAccessModesMatchTheReferenceOptions(t *testing.T) {
+	want := []string{"Plan", "Supervised", "Auto-accept edits", "Auto", "Full access"}
+	if len(accessModes) != len(want) {
+		t.Fatalf("%d access modes, want %d", len(accessModes), len(want))
+	}
+	for i, w := range want {
+		if accessModes[i].Label != w {
+			t.Errorf("mode %d = %q, want %q", i, accessModes[i].Label, w)
+		}
+	}
+}
+
+func TestSurfaceCardsMatchTheReference(t *testing.T) {
+	want := []string{"Files", "Review", "Browser", "Terminal"}
+	if len(surfaces) != len(want) {
+		t.Fatalf("%d surfaces, want %d", len(surfaces), len(want))
+	}
+	for i, w := range want {
+		if surfaces[i].Name != w {
+			t.Errorf("surface %d = %q, want %q", i, surfaces[i].Name, w)
+		}
+	}
+	if !surfaces[surfReview].Avail || surfaces[surfReview].Desc != "Review file changes" {
+		t.Error("the Review surface should be available with the reference description")
+	}
+}

@@ -57,6 +57,21 @@ type state struct {
 	rightCollapsed bool
 	ctx            context.Context
 	cancelSession  context.CancelFunc
+
+	// Composer: attachments, queued follow-ups, and the controls.
+	attachments     []string
+	queued          []string
+	models          []opencode.Model
+	modelPickerOpen bool
+	modelQuery      string
+	agents          []opencode.Agent
+	agentIdx        int
+	accessMode      int
+	pending         *opencode.PermissionRequest
+	branch          string
+	surface         int
+	workspaceFiles  []string
+	filesReady      bool
 }
 
 func main() {
@@ -195,6 +210,12 @@ func (st *state) refreshActive() {
 	if st.daemon != nil {
 		st.daemon.Broadcast("session.updated", map[string]any{"sessionID": sid})
 	}
+	// A settled turn releases the next queued follow-up, and a new tool call
+	// asks for an answer.
+	if !running {
+		go st.flushQueued()
+	}
+	go st.refreshPermissions()
 	st.win.Update(func() {})
 }
 
@@ -204,15 +225,19 @@ func (st *state) loadModel() {
 	if err != nil {
 		return
 	}
-	for _, a := range agents {
+	st.mu.Lock()
+	st.agents = agents
+	// The agent the composer starts on: the primary build agent, else the first.
+	st.agentIdx = 0
+	for i, a := range agents {
 		if a.Model != nil && a.Model.ID != "" {
-			st.mu.Lock()
 			st.modelName = a.Model.ID
-			st.mu.Unlock()
-			st.win.Update(func() {})
-			return
+			st.agentIdx = i
+			break
 		}
 	}
+	st.mu.Unlock()
+	st.win.Update(func() {})
 }
 
 func (st *state) view(c *ui.Context) {
@@ -223,6 +248,9 @@ func (st *state) view(c *ui.Context) {
 		st.settingsView(c, t)
 		return
 	}
+
+	// A tool call waiting for an answer sits above everything.
+	st.permissionDialog(c, t)
 
 	ui.Row(c).FillWidth().FillHeight().AlignItems(ui.Stretch).Children(func() {
 		// Fit the panels to the window so the chat keeps a usable width.
@@ -241,7 +269,9 @@ func (st *state) view(c *ui.Context) {
 		ui.Column(c).Grow(1).FillHeight().Children(func() {
 			st.toolbar(c, t)
 			st.chat(c, t)
+			st.modelPicker(c, t)
 			st.composer(c, t)
+			st.statusLine(c, t)
 		})
 
 		// ── Right panel (collapsible) ────────────────────────────
@@ -279,16 +309,27 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 			ui.Scroll(c).Grow(1).Children(func() {
 				ui.Column(c).Gap(2).Padding(6, 8, 12).Children(func() {
 					shown := 0
+					group := ""
 					for _, s := range sessions {
 						title := sessionLabel(s)
 						if query != "" && !strings.Contains(strings.ToLower(title), strings.ToLower(query)) {
 							continue
 						}
 						shown++
+
+						// A group header whenever the bucket changes, as the
+						// reference app's Today / Yesterday / This Week rows.
+						if g := sessionGroup(s); g != group {
+							group = g
+							ui.Text(c, g).FontSize(13).FontWeight(500).
+								TextColor(t.TextMuted).Padding(10, 10, 4)
+						}
+
 						row := ui.Row(c).Radius(7).Padding(7, 10).Gap(6).
 							AlignItems(ui.Center)
 						row.Children(func() {
-							ui.Text(c, truncate(title, 30)).FontSize(13.5).Grow(1).MaxLines(1).Ellipsis("…")
+							ui.Text(c, truncate(title, 30)).FontSize(13.5).Grow(1).
+								MaxLines(1).Ellipsis("…")
 							if s.ID == sel {
 								ui.Text(c, "•").TextColor(t.Accent)
 							}
@@ -304,7 +345,7 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 						}
 					}
 					if shown == 0 {
-						ui.Text(c, "No sessions").TextColor(t.TextMuted).Padding(8)
+						ui.Text(c, "No sessions").FontSize(13).TextColor(t.TextMuted).Padding(8)
 					}
 				})
 			})
@@ -343,6 +384,28 @@ func (st *state) selectSession(id string) {
 	st.diffState = nil
 	st.mu.Unlock()
 	st.refreshActive()
+}
+
+// sessionGroup buckets a session by how recently it was touched, as the
+// reference app's sidebar groups are: Today, Yesterday, This Week, Older.
+func sessionGroup(s opencode.Session) string {
+	if s.LastActivity() == 0 {
+		return "Sessions"
+	}
+	t := time.UnixMilli(int64(s.LastActivity()))
+	now := time.Now()
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	switch {
+	case !t.Before(midnight):
+		return "Today"
+	case !t.Before(midnight.AddDate(0, 0, -1)):
+		return "Yesterday"
+	case !t.Before(midnight.AddDate(0, 0, -7)):
+		return "This Week"
+	default:
+		return "Older"
+	}
 }
 
 // truncate shortens s to n runes with an ellipsis.
@@ -479,158 +542,6 @@ func (st *state) chat(c *ui.Context, t *ui.Theme) {
 			})
 		})
 	}).Grow(1).Gap(4).Justify(ui.End)
-}
-
-// composer is the large rounded input card with the model/access chips,
-// measured from the reference app: 20px side padding, 8px bottom, a 720
-// wide column, 12px radius, 12px inner padding.
-func (st *state) composer(c *ui.Context, t *ui.Theme) {
-	ui.Row(c).FillWidth().Justify(ui.Center).
-		Padding(0, composerPadX, composerPadY).Children(func() {
-		ui.Column(c).Width(contentMaxWidth).Children(func() {
-			box := ui.Column(c).Radius(composerRadius).Padding(composerPadInner, 10).
-				Background(composerBg(t)).Border(1, t.Border).Gap(8)
-			box.Children(func() {
-				input := ui.TextInput(c, &st.prompt).
-					Placeholder("Do anything…").FillWidth()
-				input.OnSubmit(st.send)
-
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					model := "deepseek-v4-1-flash"
-					if st.modelName != "" {
-						model = st.modelName
-					}
-					chip(c, t).Children(func() {
-						ui.Text(c, model).FontSize(12).TextColor(t.TextMuted)
-					})
-					chip(c, t).Children(func() {
-						ui.Text(c, "Full access").FontSize(12).TextColor(t.TextMuted)
-					})
-					ui.Spacer(c)
-					if ui.PrimaryButton(c, "↑").Height(sendHeight).
-						Radius(sendRadius).Clicked() {
-						st.send()
-					}
-				})
-			})
-		})
-	})
-}
-
-// send submits the current prompt for the active session.
-func (st *state) send() {
-	st.mu.Lock()
-	text := strings.TrimSpace(st.prompt)
-	sid := st.active
-	if text == "" || sid == "" || st.running {
-		st.mu.Unlock()
-		return
-	}
-	st.prompt = ""
-	st.running = true
-	st.status = "sending…"
-	st.mu.Unlock()
-	st.win.Update(func() {})
-
-	go func() {
-		if err := st.sessions.Prompt(st.ctx, sid, text); err != nil {
-			st.mu.Lock()
-			st.running = false
-			st.status = "prompt: " + err.Error()
-			st.mu.Unlock()
-			st.win.Update(func() {})
-			return
-		}
-		st.refreshActive()
-	}()
-}
-
-// panel is the right pane: the session's changes, or the "open a surface"
-// chooser when there are none.
-func (st *state) panel(c *ui.Context, t *ui.Theme) {
-	st.mu.Lock()
-	diffs := append([]opencode.FileDiff(nil), st.diffs...)
-	chosen := st.diffFile
-	st.mu.Unlock()
-
-	if len(diffs) == 0 {
-		ui.Column(c).FillWidth().FillHeight().Padding(32).Gap(4).
-			AlignItems(ui.Start).Children(func() {
-			ui.Text(c, "Open a surface").Bold()
-			ui.Text(c, "Choose what to show in this panel").
-				FontSize(12).TextColor(t.TextMuted)
-			ui.Row(c).Gap(10).Padding(20, 0, 0).Children(func() {
-				tile(c, t, "Files", "Browse the workspace")
-				tile(c, t, "Review", "Review file changes")
-			})
-		})
-		return
-	}
-
-	ui.Column(c).FillWidth().FillHeight().Gap(8).Padding(12).Children(func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Textf(c, "Changes (%d)", len(diffs)).Bold()
-		})
-		ui.List(c, nil, len(diffs), func(i int) {
-			d := diffs[i]
-			row := ui.Row(c).Gap(8).Padding(6, 10).Radius(8).AlignItems(ui.Center)
-			row.Children(func() {
-				mark := "±"
-				if d.Status == "added" {
-					mark = "+"
-				} else if d.Status == "deleted" {
-					mark = "−"
-				}
-				ui.Text(c, mark).Bold()
-				ui.Text(c, shortPath(d.File)).Grow(1)
-				ui.Textf(c, "+%d −%d", d.Additions, d.Deletions).
-					FontSize(11).TextColor(t.TextMuted)
-			})
-			if row.Clicked() {
-				st.mu.Lock()
-				st.diffFile = d.File
-				st.diffState = nil
-				st.mu.Unlock()
-			}
-			if d.File == chosen {
-				row.Background(t.Surface)
-			}
-		}).MaxHeight(140)
-
-		ui.Divider(c)
-
-		st.mu.Lock()
-		idx := 0
-		for i, d := range diffs {
-			if d.File == st.diffFile {
-				idx = i
-			}
-		}
-		if st.diffState == nil {
-			if fs, err := editor.ParsePatch(diffs[idx].Patch); err == nil && len(fs) > 0 {
-				ds := &editor.DiffState{}
-				ds.SetPatch(fs[0])
-				st.diffState = ds
-			}
-		}
-		ds := st.diffState
-		st.mu.Unlock()
-
-		if ds != nil {
-			editor.DiffView(c, ds).Grow(1).FillWidth()
-		} else {
-			ui.Text(c, "Cannot render this patch.").TextColor(t.TextMuted)
-		}
-	})
-}
-
-// tile is one choice of the surface chooser.
-func tile(c *ui.Context, t *ui.Theme, title, desc string) {
-	ui.Column(c).Width(170).Radius(14).Padding(14).Gap(4).
-		Background(t.Surface).Border(1, t.Border).Children(func() {
-		ui.Text(c, title).Bold()
-		ui.Text(c, desc).FontSize(12).TextColor(t.TextMuted)
-	})
 }
 
 // shortPath trims a long path to its last two segments.

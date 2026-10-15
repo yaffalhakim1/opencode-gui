@@ -80,14 +80,68 @@ func (s *Sessions) New(ctx context.Context, title string) (opencode.Session, err
 	return sess, nil
 }
 
-// Prompt admits text to a session. The reply arrives asynchronously; poll
-// Messages for it (the SSE bridge replaces polling on day 2).
-func (s *Sessions) Prompt(ctx context.Context, sessionID, text string) error {
+// Prompt admits a message to a session. The reply arrives asynchronously;
+// the SSE bridge refreshes it into the UI.
+func (s *Sessions) Prompt(ctx context.Context, sessionID string, in opencode.PromptInput) error {
 	srv, err := s.server()
 	if err != nil {
 		return err
 	}
-	return srv.Prompt(ctx, sessionID, text)
+	return srv.Prompt(ctx, sessionID, in)
+}
+
+// Models lists the models the server offers.
+func (s *Sessions) Models(ctx context.Context) ([]opencode.Model, error) {
+	srv, err := s.server()
+	if err != nil {
+		return nil, err
+	}
+	return srv.Models(ctx)
+}
+
+// SwitchModel changes a session's model.
+func (s *Sessions) SwitchModel(ctx context.Context, sessionID string, m opencode.ModelRef) error {
+	srv, err := s.server()
+	if err != nil {
+		return err
+	}
+	return srv.SwitchModel(ctx, sessionID, m)
+}
+
+// SwitchAgent changes a session's agent.
+func (s *Sessions) SwitchAgent(ctx context.Context, sessionID, agentID string) error {
+	srv, err := s.server()
+	if err != nil {
+		return err
+	}
+	return srv.SwitchAgent(ctx, sessionID, agentID)
+}
+
+// ListDir lists a workspace directory.
+func (s *Sessions) ListDir(ctx context.Context, path string) ([]opencode.FSEntry, error) {
+	srv, err := s.server()
+	if err != nil {
+		return nil, err
+	}
+	return srv.ListDir(ctx, path)
+}
+
+// Permissions lists the tool calls waiting for an answer.
+func (s *Sessions) Permissions(ctx context.Context) ([]opencode.PermissionRequest, error) {
+	srv, err := s.server()
+	if err != nil {
+		return nil, err
+	}
+	return srv.Permissions(ctx)
+}
+
+// ReplyPermission answers a pending permission request.
+func (s *Sessions) ReplyPermission(ctx context.Context, sessionID, requestID string, d opencode.PermissionDecision) error {
+	srv, err := s.server()
+	if err != nil {
+		return err
+	}
+	return srv.ReplyPermission(ctx, sessionID, requestID, d)
 }
 
 // Interrupt stops a running session.
