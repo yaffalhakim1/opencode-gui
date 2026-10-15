@@ -225,9 +225,16 @@ func (st *state) view(c *ui.Context) {
 	}
 
 	ui.Row(c).FillWidth().FillHeight().AlignItems(ui.Stretch).Children(func() {
+		// Fit the panels to the window so the chat keeps a usable width.
+		w, _ := c.Size()
+		leftW, rightW := fittedPanelWidths(
+			w, !st.leftCollapsed, st.tab >= 0 && !st.rightCollapsed,
+			st.sidebarWidth, panelWidthDefault,
+		)
+
 		// ── Sidebar (collapsible) ────────────────────────────────
 		if !st.leftCollapsed {
-			st.sidebar(c, t)
+			st.sidebar(c, t, leftW)
 		}
 
 		// ── Chat ─────────────────────────────────────────────────
@@ -239,7 +246,7 @@ func (st *state) view(c *ui.Context) {
 
 		// ── Right panel (collapsible) ────────────────────────────
 		if st.tab >= 0 && !st.rightCollapsed {
-			ui.Column(c).Width(panelWidthDefault).FillHeight().
+			ui.Column(c).Width(rightW).FillHeight().
 				Background(t.Background).
 				BorderWidth(0, 0, 0, 1).BorderColor(t.Border).
 				Children(func() {
@@ -251,14 +258,14 @@ func (st *state) view(c *ui.Context) {
 
 // sidebar lists sessions with a search field and time groups, as the
 // reference app's source list.
-func (st *state) sidebar(c *ui.Context, t *ui.Theme) {
+func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 	st.mu.Lock()
 	sel := st.active
 	sessions := append([]opencode.Session(nil), st.sessionsList...)
 	query := st.filter
 	st.mu.Unlock()
 
-	ui.Column(c).Width(st.sidebarWidth).FillHeight().
+	ui.Column(c).Width(width).FillHeight().
 		Background(sidebarColor(t)).
 		BorderWidth(0, 1, 0, 0).BorderColor(t.Border).
 		Children(func() {

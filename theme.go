@@ -45,6 +45,9 @@ func kerenzikovTheme(dark bool) *ui.Theme {
 	if !darkUI {
 		dark = false
 	}
+	if dark {
+		return kerenzikovDarkPalette()
+	}
 	t := *ui.LightTheme()
 	t.Dark = false
 
@@ -71,29 +74,37 @@ func kerenzikovTheme(dark bool) *ui.Theme {
 	t.Radius = 8
 	t.Spacing = 4
 	t.FontSize = 14
+	return &t
+}
 
-	if dark {
-		t.Dark = true
-		t.Background = ui.Hex("#1A1A1A")
-		t.Surface = ui.Hex("#232323")
-		t.SurfaceHover = ui.Hex("#2A2A2A")
-		t.SurfacePressed = ui.Hex("#303030")
-		t.Border = ui.Hex("#2E2E2E")
-		t.Text = ui.Hex("#E2E2E2")
-		t.TextMuted = ui.Hex("#7D7D7D")
-		t.Accent = ui.Hex("#26E085")
-		t.AccentHover = ui.Hex("#35EA92")
-		t.AccentPressed = ui.Hex("#1FCE79")
-		t.AccentText = ui.Hex("#08211A")
-		t.Danger = ui.Hex("#E2726A")
-		t.Warning = ui.Hex("#E0B36A")
-		t.Success = ui.Hex("#62C987")
-		t.Selection = ui.Hex("#3B62A8")
-		t.Focus = ui.Hex("#26E085")
-		t.Inverse = ui.Hex("#E7E9EC")
-		t.InverseText = ui.Hex("#17181C")
-		t.Scrollbar = ui.Hex("#3A3A3A")
-	}
+// kerenzikovDarkPalette is the reference app's dark look, used when darkUI is
+// on.
+func kerenzikovDarkPalette() *ui.Theme {
+	t := *ui.DarkTheme()
+	t.Dark = true
+	t.Background = ui.Hex("#1A1A1A")
+	t.Surface = ui.Hex("#232323")
+	t.SurfaceHover = ui.Hex("#2A2A2A")
+	t.SurfacePressed = ui.Hex("#303030")
+	t.Border = ui.Hex("#2E2E2E")
+	t.Text = ui.Hex("#E2E2E2")
+	t.TextMuted = ui.Hex("#7D7D7D")
+	t.Accent = ui.Hex("#26E085")
+	t.AccentHover = ui.Hex("#35EA92")
+	t.AccentPressed = ui.Hex("#1FCE79")
+	t.AccentText = ui.Hex("#08211A")
+	t.Danger = ui.Hex("#E2726A")
+	t.Warning = ui.Hex("#E0B36A")
+	t.Success = ui.Hex("#62C987")
+	t.Selection = ui.Hex("#3B62A8")
+	t.Focus = ui.Hex("#26E085")
+	t.Inverse = ui.Hex("#E7E9EC")
+	t.InverseText = ui.Hex("#17181C")
+	t.Scrollbar = ui.Hex("#3A3A3A")
+	t.ScrollbarWidth = 8
+	t.Radius = 8
+	t.Spacing = 4
+	t.FontSize = 14
 	return &t
 }
 
