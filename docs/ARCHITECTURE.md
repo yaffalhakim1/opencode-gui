@@ -24,8 +24,8 @@ A MyGo desktop GUI for opencode, with a daemon so an Android app (later) can tal
 │   `opencode serve` — HTTP + SSE, per-proj   │
 ├─────────────────────────────────────────────┤
 │ MyGo desktop app (this repo, Windows first) │
-│   - webview GUI (Vite frontend)             │
-│   - bound services = typed IPC to frontend  │
+│   - NATIVE UI (package ui, no webview)      │
+│   - view = pure function of app state       │
 └─────────────────────────────────────────────┘
 ```
 
