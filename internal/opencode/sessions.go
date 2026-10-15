@@ -23,7 +23,8 @@ type Message struct {
 	Finish  string `json:"finish"`
 }
 
-// Part is one content block of a message.
+// Part is one content block of a message. Assistant messages may also
+// carry reasoning and tool blocks, which the chat view filters out.
 type Part struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`

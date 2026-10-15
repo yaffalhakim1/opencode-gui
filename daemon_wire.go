@@ -5,13 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/egoist/mygo"
+
 	"opencode-gui/internal/daemon"
 )
 
 // startDaemon hosts the phone-facing WebSocket server and registers the
 // methods from docs/PROTOCOL.md.
 func (st *state) startDaemon(ctx context.Context) {
-	token := daemon.NewToken()
+	token := loadOrCreateToken()
 	d := daemon.New("0.0.0.0:9680", token)
 	st.daemon = d
 
@@ -72,6 +74,21 @@ func (st *state) startDaemon(ctx context.Context) {
 		}
 	}()
 	st.daemonURL = st.daemonURLFor(token)
+	daemon.Logf("daemon listening on %s (connect URL: %s)", d.Addr(), st.daemonURL)
+}
+
+// loadOrCreateToken returns the daemon token, creating and storing one on
+// first run in the system credential store (mygo.Secrets), so a paired
+// phone keeps working across restarts.
+func loadOrCreateToken() string {
+	if tok, err := mygo.Secrets.Get("daemon-token"); err == nil && len(tok) > 0 {
+		return string(tok)
+	}
+	token := daemon.NewToken()
+	if err := mygo.Secrets.Set("daemon-token", []byte(token)); err != nil {
+		daemon.Logf("daemon: could not store token (%v); using an ephemeral one", err)
+	}
+	return token
 }
 
 // daemonURLFor builds the URL a phone should use, preferring Tailscale.

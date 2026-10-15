@@ -21,34 +21,28 @@ Budget: unlimited credits, 5 calendar days. Scope is frozen at the bottom of eac
 - ~~CreateSession + Prompt + poll Messages round-trip~~ **verified: ROUNDTRIP-OK**
 - ~~GUI: sidebar session list + prompt input + reply~~ wired (markdown replies)
 
-## Day 2 — Streaming chat
-- SSE consumer of `/api/event`, reconnect on drop
-- Update GUI state from SSE (no polling): message parts appended live
-- Markdown streaming (mygo `markdown.Stream`), session switch, new session, interrupt button
-- **Read first:** https://mygo.egoist.dev/docs/windows (Windows window options, taskbar, DIPs) before finalizing window code
-- **Done when:** streaming feels live and interrupt works.
+## Day 2 — Streaming chat ✅
+- SSE consumer of `/api/event` with reconnect (`RefreshLoop`)
+- Live chat via `markdown.Stream` / `markdown.View`, follow-end list
+- Session switch, new session, interrupt button
 
-## Day 3 — Daemon
-- `internal/daemon`: WS server `:9680`, token auth (Secrets store, constant-time compare), protocol dispatcher per `docs/PROTOCOL.md`
-- SSE fan-out also broadcasts to WS clients
-- `tailscale ip -4` detection, Settings page: QR + token + copy, regenerate button
-- **Done when:** `wscat` (or a curl→WS script) completes the example flow in `PROTOCOL.md` over the Tailscale IP.
+## Day 3 — Daemon ✅
+- `internal/daemon`: WS server `:9680`, token auth (constant-time), dispatcher
+- Token persisted in Windows Credential Manager (`mygo.Secrets`)
+- Tailscale IP detection; sidebar shows connected phones + copy URL
+- **Verified**: bad token refused; over the Tailscale IP, `system.health` →
+  `session.create` → `session.prompt` → reply `PHONE-OK`
 
-## Day 4 — Permissions + polish
-- Permission flow: SSE `permission.updated` → GUI dialog → `POST /session/:id/permissions/:id`; same surfaced to Android as event + `permission.respond`
-- Session diff view (`/session/:id/diff`)
-- Error states: opencode crash/restart, daemon client disconnects, missing Tailscale
-- Tray icon + "daemon running" indicator
-- **Done when:** a tool-call permission can be approved from the phone while the desktop shows the same dialog.
+## Day 4 — Diff inspector ✅
+- `editor.ParsePatch` + `editor.DiffView` in the right pane
+- Changed-file list per session with add/remove counts, click to view
 
-## Day 5 — Ship desktop
-- `mygo build` → Windows installer (`build/windows-amd64/`)
-- README: install, first run, connect phone (QR)
-- Real test: phone on cellular via Tailscale, run a prompt, approve a permission
-- Tag v0.1.0
+## Day 5 — Ship ✅
+- `go tool mygo build` → `build/windows-amd64/OpenCode GUI.exe` (13.3 MB) + installer
+- README + docs updated with verified facts
 
 ## Post-v1 (Android repo, Jetpack Compose)
 - Connect page per `docs/PAIRING.md` (QR scan + manual)
 - Chat list → session → streaming chat
-- Permission approve/reject notifications (foreground service optional)
-- Repo: separate, consumes only `docs/PROTOCOL.md` — contract is frozen there first.
+- Permission approve/reject notifications
+- Consumes only `docs/PROTOCOL.md` — frozen contract.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math"
 	"strings"
 	"sync"
 	"time"
@@ -49,7 +48,7 @@ type state struct {
 	diffState     *editor.DiffState
 	daemon        *daemon.Daemon
 	daemonURL     string
-	lastDiffFile  string
+	diffFile      string
 	ctx           context.Context
 	cancelSession context.CancelFunc
 }
@@ -380,40 +379,79 @@ func (st *state) send() {
 	}()
 }
 
-// inspector shows the diff for the active session.
+// inspector shows the changed files of the active session and the diff of
+// the chosen one.
 func (st *state) inspector(c *ui.Context, t *ui.Theme) {
 	st.mu.Lock()
 	diffs := append([]opencode.FileDiff(nil), st.diffs...)
+	chosen := st.diffFile
 	st.mu.Unlock()
 
-	ui.Text(c, "Changes").Bold().Padding(12, 12, 4)
+	ui.Textf(c, "Changes (%d)", len(diffs)).Bold().Padding(12, 12, 4)
 	if len(diffs) == 0 {
 		ui.Text(c, "No changes in this session.").TextColor(t.TextMuted).Padding(12)
 		return
 	}
 
-	// Show the first changed file's patch with the diff viewer.
-	st.mu.Lock()
-	file := diffs[0].File
-	if st.lastDiffFile != file || st.diffState == nil {
-		if fs, err := editor.ParsePatch(diffs[0].Patch); err == nil && len(fs) > 0 {
-			d := &editor.DiffState{}
-			d.SetPatch(fs[0])
-			st.diffState = d
+	// File list, newest state first.
+	ui.List(c, nil, len(diffs), func(i int) {
+		d := diffs[i]
+		row := ui.Row(c).Gap(8).Padding(4, 12).AlignItems(ui.Center)
+		row.Children(func() {
+			mark := "±"
+			switch d.Status {
+			case "added":
+				mark = "+"
+			case "deleted":
+				mark = "−"
+			}
+			ui.Text(c, mark).Bold()
+			ui.Text(c, shortPath(d.File)).Grow(1)
+			ui.Textf(c, "+%d −%d", d.Additions, d.Deletions).FontSize(11).TextColor(t.TextMuted)
+		})
+		if row.Clicked() {
+			st.mu.Lock()
+			st.diffFile = d.File
+			st.diffState = nil // rebuild below
+			st.mu.Unlock()
 		}
-		st.lastDiffFile = file
+		if d.File == chosen {
+			row.Background(t.Selection)
+		}
+	}).MaxHeight(160)
+
+	// The diff of the chosen file.
+	st.mu.Lock()
+	idx := 0
+	for i, d := range diffs {
+		if d.File == st.diffFile {
+			idx = i
+		}
+	}
+	if st.diffState == nil {
+		if fs, err := editor.ParsePatch(diffs[idx].Patch); err == nil && len(fs) > 0 {
+			ds := &editor.DiffState{}
+			ds.SetPatch(fs[0])
+			st.diffState = ds
+		}
 	}
 	ds := st.diffState
 	st.mu.Unlock()
 
-	ui.Row(c).Gap(8).Padding(0, 12, 8).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, diffs[0].File).Bold()
-		ui.Textf(c, "+%d −%d", diffs[0].Additions, diffs[0].Deletions).TextColor(t.TextMuted)
-	})
+	ui.Divider(c)
 	if ds != nil {
 		editor.DiffView(c, ds).Grow(1).FillWidth()
+	} else {
+		ui.Text(c, "Cannot render this patch.").TextColor(t.TextMuted).Padding(12)
 	}
 }
 
-// unused guard so math stays imported if follow-end logic moves.
-var _ = math.MaxFloat32
+// shortPath trims a long path to its last two segments.
+func shortPath(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	parts := strings.Split(p, "/")
+	if len(parts) <= 2 {
+		return p
+	}
+	return ".../" + strings.Join(parts[len(parts)-2:], "/")
+}

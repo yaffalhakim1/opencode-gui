@@ -1,53 +1,58 @@
-# opencode integration — what we call and how
+# OPENCODE — integration notes (verified against v2)
 
-opencode runs as a **child process** of the desktop app.
+Everything here is confirmed against the running v2 server, the OpenAPI spec
+(`https://opencode.ai/v2/openapi.json`), and the docs. No assumptions.
 
-## Process management (`internal/opencode/process.go`)
+## The service model
 
-```
-start:    exec.Command("opencode", "serve", "--port", "4096", "--hostname", "127.0.0.1")
-health:   GET /global/health → {"healthy":true,"version":"..."}  (poll 250ms until ok, 10s timeout)
-crash:    process exits → restart with backoff (1s, 2s, 4s … 30s), emit "daemon" event to GUI + WS
-shutdown: app quit → POST nothing; kill process group (Windows: cmd.Process.Kill on the job)
-```
+opencode v2 runs **one shared background server per user**. Clients discover
+it rather than starting their own:
 
-If port 4096 is taken by an unrelated server: try 4097..4105, remember the chosen port for the session. Never kill an existing listener we didn't spawn.
+- `opencode service status | start | restart | stop`
+- It registers itself at `~/.local/state/opencode/service.json`:
+  ```json
+  { "id": "...", "version": "2.0.28", "url": "http://127.0.0.1:49374", "pid": 20048, "password": "..." }
+  ```
+- Clients authenticate with HTTP Basic, user `opencode`, password from that file.
+  (This is exactly what the official JS `Service.headers(endpoint)` builds.)
 
-## Endpoints used (from official docs)
+Our app calls `opencode.Discover()` (reads that file) then `opencode.Attach(ep)`.
+It never spawns or kills a server.
 
-Only what the GUI + daemon need:
+## Endpoints used
 
-| Endpoint | Used by |
-|---|---|
-| `GET /global/health` | process supervisor |
-| `GET /event` (SSE) | event bridge (single consumer, fans out) |
-| `GET /session`, `POST /session`, `GET /session/:id`, `DELETE /session/:id`, `GET /session/:id/message` | session list / chat history |
-| `POST /session/:id/prompt_async` | send prompt without blocking |
-| `POST /session/:id/abort` | stop button |
-| `GET /session/:id/diff` | diff view |
-| `POST /session/:id/permissions/:permissionID` | permission respond |
-| `GET /agent`, `GET /config/providers` | model/agent pickers |
+| Purpose | Method & path | Notes |
+|---|---|---|
+| Health | `GET /api/info` | `{version, pid, urls, capabilities}` |
+| List sessions | `GET /api/session?order=desc` | `{data: [...]}` |
+| Create session | `POST /api/session` | body `{title?}` |
+| Send prompt | `POST /api/session/{id}/prompt` | body `{text}` — **async** |
+| List messages | `GET /api/session/{id}/message` | `{data: [...]}` |
+| Interrupt | `POST /api/session/{id}/interrupt` | |
+| Diff | `GET /api/session/{id}/diff` | `{data: [{file,patch,additions,deletions,status}]}` |
+| Events | `GET /api/event` | SSE, `event:` + JSON `data:` |
 
-Not used (v1): `/file*`, `/find*`, `/tui/*`, `/mcp`, `/log`, share endpoints.
+## Shapes that differ from v1 (these broke the first attempt)
 
-## SSE bridge (`internal/opencode/events.go`)
+- Responses are wrapped: `{ "location"?: ..., "data": ... }`.
+- Messages are `{id, type: "assistant"|"user", content: [{type, text}], finish}` —
+  **not** `{info, parts}` with a `role`. Assistant content blocks may be
+  `text`, `reasoning`, or `tool`; the chat view renders `text` only.
+- `finish` is present on an assistant message once the model stopped; while it
+  is empty the reply is still streaming.
+- Prompts are **async**: the call returns once the input is admitted; the reply
+  arrives in the message list (we refresh on SSE events).
 
-- One goroutine, `GET /event`, parse `event:` + `data:` lines, decode into `Event{Type, Properties}` (properties stay raw JSON).
-- On stream error: reconnect with backoff, no event loss guarantee (opencode provides none) — after reconnect, refresh sessions from REST to resync.
-- Fan-out to: (a) MyGo typed events per window, (b) daemon broadcast. Ordering preserved per consumer.
+## Events
 
-## Message shapes
+`GET /api/event` is a live-only SSE stream (no replay). Our `RefreshLoop`
+subscribes, and when an event's payload mentions the active session, re-reads
+that session's messages and diffs. It reconnects with backoff when the stream
+drops. Subscriptions are per-process; the daemon re-broadcasts a
+`session.updated` event to phones from the same refresh path.
 
-Prompt body:
+## Debugging
 
-```json
-{ "parts": [{ "type": "text", "text": "..." }], "agent": "build" }
-```
-
-Model selection (optional): `"model": { "providerID": "...", "modelID": "..." }`.
-
-Message list returns `{ info: Message, parts: Part[] }[]` — the GUI renders parts by `type` (text / tool / step / patch), phone renders text + tool-status only in v1.
-
-## Versioning
-
-`GET /global/health` gives the version; the GUI displays it. If opencode's API drifts, the OpenAPI spec lives at `/doc` — regen point for typed client if needed. We hand-roll a thin client (≈10 endpoints); regen tooling is YAGNI until drift hurts.
+- `opencode api get /api/info` — the CLI does discovery + auth for you.
+- `opencode api agent.list` — confirm agents (build, plan, …).
+- Logs: `~/.local/share/opencode/log/opencode.log`, filter `role=server`.

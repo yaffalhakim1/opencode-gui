@@ -33,10 +33,24 @@ A method is "WS-exposed" only if it is in `docs/PROTOCOL.md`. The dispatcher map
 
 ## Binding & security
 
-- Default bind: `0.0.0.0:9680` (works whether or not Tailscale is up). When `tailscale ip -4` succeeds, the Settings page shows the tailscale address as the recommended connect target.
-- Token: 32 random bytes, base64url, in Windows Credential Manager via `mygo.Secrets` (survives reinstall, encrypted per-user). Compared with `subtle.ConstantTimeCompare`.
-- 401 on bad token, connection never upgraded. No rate-limit needed — the port is only reachable from the tailnet/LAN, and a wrong-token flood is cheap to reject.
-- No TLS: Tailscale is the transport security. GUI warns if user connects over plain LAN IP.
+- Bind: `0.0.0.0:9680`, so it works with or without Tailscale up. The sidebar
+  shows the Tailscale address (detected via `tailscale ip -4`, falling back to
+  the MagicDNS name) as the connect target.
+- Token: 32 random bytes, base64url, stored in the Windows Credential Manager
+  via `mygo.Secrets` (service `dev.yafit.opencodegui`, account `daemon-token`),
+  so a paired phone keeps working across restarts. Compared with
+  `subtle.ConstantTimeCompare`.
+- 401 on bad token, connection never upgraded (verified in `scripts/daemontest.go`).
+- No TLS: Tailscale is the transport security. Plain-LAN use is unencrypted.
+- Per-client 256-message send buffer; a client that falls behind is dropped
+  rather than blocking the fan-out.
+
+## Verified behaviour
+
+`scripts/daemontest.go` (local) and `scripts/phoneflow.go` (over the tailnet IP)
+both pass: bad token refused, `daemon.hello` on connect, and the documented
+`system.health → session.create → session.prompt → session.messages` flow
+returning the model's reply.
 
 ## Windows notes
 
