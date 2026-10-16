@@ -304,11 +304,24 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 		Background(sidebarColor(t)).
 		BorderWidth(0, 1, 0, 0).BorderColor(t.Border).
 		Children(func() {
-			ui.Column(c).Gap(8).Padding(12).Children(func() {
-				if ui.PrimaryButton(c, "New session").FillWidth().Clicked() {
+			// Title bar: the panel toggle, then Back and Forward, as the
+			// reference's sidebar titlebar (h48, px10, gap2).
+			st.sidebarTitlebar(c, t)
+
+			// New task is a plain action row with a leading icon, not a
+			// filled button, as render_sidebar_action_row builds it.
+			ui.Column(c).FillWidth().Padding(0, sidebarPadX).Children(func() {
+				row := iconRow(c, t, iconCompose, "New task")
+				if row.Hovered() {
+					row.Background(itemBg(t))
+				}
+				if row.Clicked() {
 					go st.newSession()
 				}
-				ui.SearchField(c, &st.filter).Label("Filter sessions").FillWidth()
+			})
+
+			ui.Column(c).FillWidth().Padding(6, sidebarPadX, 0).Children(func() {
+				ui.SearchField(c, &st.filter).Label("Filter tasks").FillWidth()
 			})
 
 			// The session list is a List, which builds only the rows in view,
@@ -332,8 +345,17 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 				// A group header whenever the bucket changes, as the reference
 				// app's Today / Yesterday / This Week rows.
 				if g := sessionGroup(s); i == 0 || g != sessionGroup(visible[i-1]) {
-					ui.Text(c, g).FontSize(13).FontWeight(500).
-						TextColor(t.TextMuted).Padding(10, 10, 4)
+					// The reference puts a 10-high spacer after each group, so
+					// a header is preceded by that gap (nothing before the
+					// first). The header itself is 28 high with px8.
+					if i > 0 {
+						ui.Row(c).Height(groupSpacer)
+					}
+					ui.Row(c).Height(groupHeaderHeight).Padding(0, 8).
+						AlignItems(ui.Center).Children(func() {
+						ui.Text(c, g).FontSize(13).FontWeight(500).
+							TextColor(t.TextMuted)
+					})
 				}
 				row := ui.Row(c).Radius(7).Padding(7, 10).Gap(6).AlignItems(ui.Center)
 				row.Children(func() {
@@ -358,25 +380,41 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 				}
 			})
 
-			ui.Column(c).Gap(6).Padding(12).
+			// Footer: the daemon row and icon buttons for its URL and Settings.
+			ui.Column(c).FillWidth().Gap(6).Padding(8, sidebarPadX).
 				BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
 				clients := 0
 				if st.daemon != nil {
 					clients = st.daemon.Clients()
 				}
-				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "Daemon").FontSize(11).TextColor(t.TextMuted)
+				ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "Daemon").FontSize(11).TextColor(t.TextMuted).Grow(1)
 					ui.Badge(c, fmt.Sprintf("%d phone(s)", clients))
+					if actionIconButton(c, iconCopy, "Copy connect URL").Clicked() {
+						mygo.Clipboard.WriteText(st.daemonURL)
+						c.Toast("Connect URL copied")
+					}
+					if actionIconButton(c, iconSettings, "Settings").Clicked() {
+						st.openSettings()
+					}
 				})
-				if ui.Button(c, "Copy connect URL").FillWidth().Clicked() {
-					mygo.Clipboard.WriteText(st.daemonURL)
-					c.Toast("Connect URL copied")
-				}
-				if ui.Button(c, "Settings").FillWidth().Clicked() {
-					st.openSettings()
-				}
 			})
 		})
+}
+
+// sidebarTitlebar is the strip above the sidebar's actions: the panel toggle
+// on the left, then Back and Forward, as the reference's sidebar titlebar.
+func (st *state) sidebarTitlebar(c *ui.Context, t *ui.Theme) {
+	ui.Row(c).FillWidth().Height(titlebarHeight).Padding(0, sidebarPadX).
+		AlignItems(ui.Center).Children(func() {
+		if actionIconButton(c, iconPanelLeft, "Toggle left panel").Clicked() {
+			st.leftCollapsed = true
+		}
+		ui.Row(c).Gap(2).PaddingStart(6).Children(func() {
+			actionIconButton(c, iconArrowLeft, "Back")
+			actionIconButton(c, iconArrowRight, "Forward")
+		})
+	})
 }
 
 // selectSession makes a session active and loads it.
@@ -470,13 +508,12 @@ func (st *state) toolbar(c *ui.Context, t *ui.Theme) {
 	st.mu.Unlock()
 
 	ui.Toolbar(c, func() {
-		// Top-left: expand/collapse the left panel.
-		leftGlyph := "◧"
+		// The left panel's toggle lives in the sidebar titlebar, so when the
+		// sidebar is collapsed this button brings it back.
 		if st.leftCollapsed {
-			leftGlyph = "▣"
-		}
-		if ui.Button(c, leftGlyph).Label("Toggle left panel").Clicked() {
-			st.leftCollapsed = !st.leftCollapsed
+			if actionIconButton(c, iconPanelLeft, "Show left panel").Clicked() {
+				st.leftCollapsed = false
+			}
 		}
 
 		title := "New task"
@@ -500,11 +537,11 @@ func (st *state) toolbar(c *ui.Context, t *ui.Theme) {
 		}
 
 		// Top-right: expand/collapse the right panel.
-		rightGlyph := "◨"
+		rightGlyph := iconPanelLeft
 		if st.rightCollapsed {
-			rightGlyph = "▣"
+			rightGlyph = iconPanelLeft
 		}
-		if ui.Button(c, rightGlyph).Label("Toggle right panel").Clicked() {
+		if actionIconButton(c, rightGlyph, "Toggle right panel").Clicked() {
 			st.tab = 0
 			st.rightCollapsed = !st.rightCollapsed
 		}

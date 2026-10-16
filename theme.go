@@ -17,11 +17,14 @@ const (
 	contentMaxWidth = 720
 
 	// Sidebar rows.
-	sessionRowHeight  = 32 // SIDEBAR_SESSION_CARD_HEIGHT
-	actionRowHeight   = 32 // SIDEBAR_ACTION_ROW_HEIGHT
-	groupHeaderHeight = 28 // SIDEBAR_GROUP_HEADER_HEIGHT
-	groupSpacer       = 10 // SIDEBAR_GROUP_SPACER_HEIGHT
-	searchBottomGap   = 10 // SIDEBAR_SEARCH_BOTTOM_GAP
+	sessionRowHeight  = 32    // SIDEBAR_SESSION_CARD_HEIGHT
+	actionRowHeight   = 32    // SIDEBAR_ACTION_ROW_HEIGHT
+	groupHeaderHeight = 28    // SIDEBAR_GROUP_HEADER_HEIGHT
+	groupSpacer       = 10    // SIDEBAR_GROUP_SPACER_HEIGHT
+	searchBottomGap   = 10    // SIDEBAR_SEARCH_BOTTOM_GAP
+	sidebarPadX       = 10    // the reference wraps its sidebar children in px(10)
+	sidebarActionHeight = 32  // SIDEBAR_ACTION_ROW_HEIGHT
+	titlebarHeight      = 48  // the reference's sidebar titlebar height
 
 	// Composer.
 	composerPadX     = 20

@@ -53,33 +53,54 @@ func TestPanelToggles(t *testing.T) {
 		ctx:          context.Background(),
 		tab:          0,
 	}
+	// The toggles are icon-only buttons, named for assistive technology, so
+	// they are reached by their labels.
 	tt := ui.NewTester(st.view, 1280, 800)
 
-	// Collapse the left panel.
-	if err := tt.Click("◧"); err != nil {
+	if err := tt.Click("Toggle left panel"); err != nil {
 		t.Fatalf("click left toggle: %v", err)
 	}
 	if !st.leftCollapsed {
 		t.Error("left panel did not collapse")
 	}
-	if !tt.HasText("▣") {
-		t.Errorf("left glyph did not change, texts %q", tt.Texts())
+
+	// With the sidebar gone, the toolbar shows the button that brings it back.
+	tt2 := ui.NewTester(st.view, 1280, 800)
+	if err := tt2.Click("Show left panel"); err != nil {
+		t.Fatalf("click show-left: %v", err)
+	}
+	if st.leftCollapsed {
+		t.Error("left panel did not expand")
 	}
 
 	// Collapse the right panel.
-	if err := tt.Click("◨"); err != nil {
+	tt3 := ui.NewTester(st.view, 1280, 800)
+	if err := tt3.Click("Toggle right panel"); err != nil {
 		t.Fatalf("click right toggle: %v", err)
 	}
 	if !st.rightCollapsed {
 		t.Error("right panel did not collapse")
 	}
+}
 
-	// Expand both again.
-	tt2 := ui.NewTester(st.view, 1280, 800)
-	if err := tt2.Click("▣"); err != nil {
-		t.Fatalf("expand: %v", err)
+// TestSidebarRowsAreIconsNotFilledButtons checks the sidebar's actions follow
+// the reference: a plain icon+label row, not a filled accent button.
+func TestSidebarRowsAreIconsNotFilledButtons(t *testing.T) {
+	st := &state{
+		sessions:     &app.Sessions{},
+		sidebarWidth: sidebarWidthDefault,
+		ctx:          context.Background(),
+		tab:          0,
 	}
-	if st.leftCollapsed {
-		t.Error("left panel did not expand")
+	tt := ui.NewTester(st.view, 1280, 800)
+
+	if tt.HasText("New session") {
+		t.Error("the sidebar still shows the old filled \"New session\" button")
+	}
+	if !tt.HasText("New task") {
+		t.Errorf("the sidebar should show the \"New task\" action row, texts %q", tt.Texts())
+	}
+	if !tt.HasText("Filter tasks") {
+		t.Error("the filter should be labelled \"Filter tasks\"")
 	}
 }
