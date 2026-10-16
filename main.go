@@ -340,24 +340,30 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 				}
 				return i
 			}
+			// The list spans the sidebar's full width so its scroll bar sits
+			// at the far right, as the reference's does (there the bar is a
+			// sibling of the padded list, on the outer container). The rows
+			// carry the inset instead, so a hovered or chosen row still lines
+			// up with the New task button above it.
 			ui.List(c, &st.sidebarList, len(visible), func(i int) {
 				s := visible[i]
-				// A group header whenever the bucket changes, as the reference
-				// app's Today / Yesterday / This Week rows.
+				// A group header whenever the bucket changes, as the
+				// reference app's Today / Yesterday / This Week rows.
 				if g := sessionGroup(s); i == 0 || g != sessionGroup(visible[i-1]) {
-					// The reference puts a 10-high spacer after each group, so
-					// a header is preceded by that gap (nothing before the
+					// The reference puts a 10-high spacer after each group,
+					// so a header is preceded by that gap (nothing before the
 					// first). The header itself is 28 high with px8.
 					if i > 0 {
 						ui.Row(c).Height(groupSpacer)
 					}
-					ui.Row(c).Height(groupHeaderHeight).Padding(0, 8).
-						AlignItems(ui.Center).Children(func() {
+					ui.Row(c).Height(groupHeaderHeight).MarginX(sidebarPadX).
+						Padding(0, 8).AlignItems(ui.Center).Children(func() {
 						ui.Text(c, g).FontSize(13).FontWeight(500).
 							TextColor(t.TextMuted)
 					})
 				}
-				row := ui.Row(c).Radius(7).Padding(7, 10).Gap(6).AlignItems(ui.Center)
+				row := ui.Row(c).MarginX(sidebarPadX).Radius(7).
+					Padding(7, 10).Gap(6).AlignItems(ui.Center)
 				row.Children(func() {
 					ui.Text(c, truncate(sessionLabel(s), 30)).FontSize(13.5).Grow(1).
 						MaxLines(1).Ellipsis("…")
@@ -376,7 +382,8 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 				}
 			}).Grow(1).Children(func() {
 				if len(visible) == 0 {
-					ui.Text(c, "No sessions").FontSize(13).TextColor(t.TextMuted).Padding(8)
+					ui.Text(c, "No sessions").FontSize(13).TextColor(t.TextMuted).
+						MarginX(sidebarPadX).Padding(8)
 				}
 			})
 

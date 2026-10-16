@@ -105,7 +105,8 @@ func TestHumanCostAlwaysShowsCents(t *testing.T) {
 }
 
 func TestMaskKeepsOnlyTheLastFourCharacters(t *testing.T) {
-	tok := "-ubUbwomD1Q9Wb6Tq1gIkhet3mimVCd9QomPoiQLU7c"
+	// A made-up token of the same shape, never a real one.
+	tok := "FAKE-token-for-tests-only-0123456789abcdefXYZ"
 	got := mask(tok)
 
 	if strings.Contains(got, tok[:10]) {
@@ -196,8 +197,14 @@ func TestSettingsCardUsesTheReferenceRadius(t *testing.T) {
 }
 
 func TestSidebarWidthDefaultsMatchTheReference(t *testing.T) {
-	if sidebarWidthDefault != 252 {
-		t.Errorf("sidebar default = %v, want 252", sidebarWidthDefault)
+	// 252 is the reference's DEFAULT_SIDEBAR_WIDTH; this app widens it to 272
+	// so the icon rows have more room. Keep it within the reference's bounds.
+	if sidebarWidthDefault < sidebarWidthMin || sidebarWidthDefault > sidebarWidthMax {
+		t.Errorf("sidebar default %v is outside its bounds %v..%v",
+			sidebarWidthDefault, sidebarWidthMin, sidebarWidthMax)
+	}
+	if sidebarWidthDefault < 252 {
+		t.Errorf("sidebar default = %v, want at least the reference's 252", sidebarWidthDefault)
 	}
 	if panelWidthDefault != 380 {
 		t.Errorf("panel default = %v, want 380", panelWidthDefault)

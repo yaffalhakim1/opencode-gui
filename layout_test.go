@@ -46,21 +46,22 @@ func TestWideWindowKeepsRequestedWidths(t *testing.T) {
 }
 
 func TestRightPanelShrinksBeforeTheSidebar(t *testing.T) {
-	// 900 - 360 = 540 available for 252 + 460 = 712: overflow 172 comes out of
-	// the right panel first, which has room to 280.
-	sidebar, panel := fittedPanelWidths(900, true, true, sidebarWidthDefault, panelWidthDefault)
+	// Available for panels: 980 - 360 = 620. The default widths total
+	// 272 + 380 = 652, so 32 comes out of the right panel, which has room
+	// down to its 280 minimum — the sidebar keeps its width.
+	sidebar, panel := fittedPanelWidths(980, true, true, sidebarWidthDefault, panelWidthDefault)
 
 	if sidebar != sidebarWidthDefault {
 		t.Errorf("sidebar shrank to %v, want %v kept", sidebar, float32(sidebarWidthDefault))
 	}
-	if panel != 460-172 {
-		t.Errorf("right panel = %v, want %v", panel, float32(460-172))
+	if panel != panelWidthDefault-32 {
+		t.Errorf("right panel = %v, want %v", panel, float32(panelWidthDefault-32))
 	}
 }
 
 func TestSidebarShrinksOnlyAfterTheRightPanelHitsItsMinimum(t *testing.T) {
-	// At 880 the panels have 520. Right panel gives its full 180 (460→280),
-	// then the sidebar gives the remaining 12 (252→240).
+	// At 880 the panels have 520. The right panel gives its full 100
+	// (380→280), then the sidebar gives the remaining 32 (272→240).
 	sidebar, panel := fittedPanelWidths(880, true, true, sidebarWidthDefault, panelWidthDefault)
 
 	if panel != panelMinWidth {

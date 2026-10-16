@@ -6,7 +6,7 @@ import "github.com/egoist/mygo/ui"
 // persistence.rs) so the proportions match, not guessed.
 const (
 	// Layout widths.
-	sidebarWidthDefault = 252 // DEFAULT_SIDEBAR_WIDTH
+	sidebarWidthDefault = 272 // DEFAULT_SIDEBAR_WIDTH is 252; 272 gives the rows more room
 	sidebarWidthMin     = 180 // SIDEBAR_MIN_WIDTH
 	sidebarWidthMax     = 420 // SIDEBAR_MAX_WIDTH
 	panelWidthDefault   = 380 // DEFAULT_RIGHT_PANEL_WIDTH is 460; 380 fits a 1280 window
