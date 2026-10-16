@@ -25,6 +25,9 @@ const (
 	sidebarPadX       = 10    // the reference wraps its sidebar children in px(10)
 	sidebarActionHeight = 32  // SIDEBAR_ACTION_ROW_HEIGHT
 	titlebarHeight      = 48  // the reference's sidebar titlebar height
+	showMoreRowHeight   = 30  // SIDEBAR_SHOW_MORE_ROW_HEIGHT
+	groupChildPadding   = 28  // SIDEBAR_GROUP_CHILD_PADDING
+	revealBatch         = 30  // SIDEBAR_PROJECT_REVEAL_BATCH
 
 	// Composer.
 	composerPadX     = 20

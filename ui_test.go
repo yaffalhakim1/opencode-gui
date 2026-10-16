@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -377,18 +378,21 @@ func todaySession(id, title string) opencode.Session {
 }
 
 func TestFoldingAGroupHidesItsSessions(t *testing.T) {
-	// The row builder skips a folded group's sessions but keeps its header,
-	// as the reference's sidebar_rows does.
+	// The row builder skips a folded group's sessions but keeps its header
+	// and the spacer after it, as the reference's sidebar_rows does.
 	rows := buildSidebarRows([]opencode.Session{
 		todaySession("a", "today one"),
 		todaySession("b", "today two"),
-	}, map[string]bool{"Today": true})
+	}, map[string]bool{"Today": true}, nil)
 
-	if len(rows) != 1 {
-		t.Fatalf("%d rows, want just the header", len(rows))
+	if len(rows) != 2 { // header + spacer
+		t.Fatalf("%d rows, want the header and its spacer", len(rows))
 	}
-	if rows[0].Header != "Today" {
-		t.Errorf("header = %q, want Today", rows[0].Header)
+	if rows[0].Kind != rowHeader || rows[0].Header != "Today" {
+		t.Errorf("first row = %+v, want the Today header", rows[0])
+	}
+	if rows[1].Kind != rowSpacer {
+		t.Errorf("second row = %+v, want the group spacer", rows[1])
 	}
 }
 
@@ -396,18 +400,87 @@ func TestUnfoldedGroupKeepsItsSessions(t *testing.T) {
 	rows := buildSidebarRows([]opencode.Session{
 		todaySession("a", "one"),
 		todaySession("b", "two"),
-	}, nil)
+	}, nil, nil)
 
-	if len(rows) != 3 { // header + two sessions
-		t.Fatalf("%d rows, want a header and two sessions", len(rows))
+	// header + two sessions + spacer
+	if len(rows) != 4 {
+		t.Fatalf("%d rows, want a header, two sessions and a spacer", len(rows))
 	}
-	if rows[0].Header == "" {
+	if rows[0].Kind != rowHeader {
 		t.Error("the first row should be the group header")
+	}
+	if rows[3].Kind != rowSpacer {
+		t.Error("the last row should be the group spacer")
+	}
+}
+
+// TestEveryGroupEndsWithASpacer is the gap that keeps groups from reading as
+// one, which the reference reserves as SIDEBAR_GROUP_SPACER_HEIGHT.
+func TestEveryGroupEndsWithASpacer(t *testing.T) {
+	now := time.Now()
+	older := func(id string, daysAgo int) opencode.Session {
+		var s opencode.Session
+		s.ID = id
+		s.Time.Updated = float64(now.AddDate(0, 0, -daysAgo).UnixMilli())
+		return s
+	}
+	rows := buildSidebarRows([]opencode.Session{
+		todaySession("t1", "today"),
+		older("y1", 1),
+	}, nil, nil)
+
+	spacers := 0
+	for _, r := range rows {
+		if r.Kind == rowSpacer {
+			spacers++
+		}
+	}
+	if spacers != 2 {
+		t.Errorf("%d spacers for 2 groups, want one each", spacers)
+	}
+}
+
+func TestAGroupWithMoreThanTheBatchShowsMore(t *testing.T) {
+	var many []opencode.Session
+	for i := 0; i < revealBatch+5; i++ {
+		many = append(many, todaySession(fmt.Sprintf("s%02d", i), "s"))
+	}
+
+	rows := buildSidebarRows(many, nil, nil)
+	sawMore := false
+	sessions := 0
+	for _, r := range rows {
+		switch r.Kind {
+		case rowShowMore:
+			sawMore = true
+		case rowSession:
+			sessions++
+		}
+	}
+	if !sawMore {
+		t.Error("a group past the batch should offer Show more")
+	}
+	if sessions != revealBatch {
+		t.Errorf("%d sessions shown, want the first batch of %d", sessions, revealBatch)
+	}
+}
+
+func TestShowMoreRevealsTheNextBatch(t *testing.T) {
+	var many []opencode.Session
+	for i := 0; i < revealBatch+5; i++ {
+		many = append(many, todaySession(fmt.Sprintf("s%02d", i), "s"))
+	}
+
+	rows := buildSidebarRows(many, nil, map[string]int{"Today": revealBatch * 2})
+	for _, r := range rows {
+		if r.Kind == rowShowMore {
+			t.Error("after revealing two batches the Show more row should be gone")
+		}
 	}
 }
 
 func TestSidebarRowsCarryAStableKey(t *testing.T) {
-	rows := buildSidebarRows([]opencode.Session{todaySession("ses_x", "x")}, nil)
+	rows := buildSidebarRows([]opencode.Session{todaySession("ses_x", "x")}, nil, nil)
 	if got := rows[0].key(); got != "h:Today" {
 		t.Errorf("header key = %q, want h:Today", got)
 	}
@@ -427,14 +500,18 @@ func TestFoldingOneGroupLeavesTheOthers(t *testing.T) {
 	rows := buildSidebarRows([]opencode.Session{
 		todaySession("t1", "today"),
 		older("y1", "yesterday", 1),
-	}, map[string]bool{"Yesterday": true})
+	}, map[string]bool{"Yesterday": true}, nil)
 
-	// Today's header and its session, then Yesterday's header alone.
-	if len(rows) != 3 {
-		t.Fatalf("%d rows, want Today + its session + the Yesterday header", len(rows))
+	// Today's header, its session, its spacer, then Yesterday's header and
+	// its spacer.
+	if len(rows) != 5 {
+		t.Fatalf("%d rows: %+v", len(rows), rows)
 	}
-	if rows[0].Header != "Today" || rows[1].Sess.ID != "t1" || rows[2].Header != "Yesterday" {
-		t.Errorf("rows = %+v", rows)
+	if rows[0].Header != "Today" || rows[1].Sess.ID != "t1" {
+		t.Errorf("Today's rows are wrong: %+v", rows[:2])
+	}
+	if rows[3].Kind != rowHeader || rows[3].Header != "Yesterday" {
+		t.Errorf("Yesterday's header missing: %+v", rows[3])
 	}
 }
 

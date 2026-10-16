@@ -74,6 +74,7 @@ type state struct {
 	fsEntries       []opencode.FSEntry
 	filesReady      bool
 	foldedGroups    map[string]bool
+	revealedGroups  map[string]int
 	oldestFirst     bool
 	openPath        string
 	openText        string
@@ -365,9 +366,10 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 					visible[i], visible[j] = visible[j], visible[i]
 				}
 			}
-			// Rows are the headers and the sessions of the groups that are
-			// open, so a folded group shows only its header.
-			rows := buildSidebarRows(visible, st.foldedGroups)
+			// Rows are the headers, the sessions of the groups that are open,
+			// a "Show more" row while a group has more, and a spacer after
+			// each group so groups read apart.
+			rows := buildSidebarRows(visible, st.foldedGroups, st.revealedGroups)
 
 			st.sidebarList.Key = func(i int) any {
 				if i >= len(rows) {
@@ -377,14 +379,40 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 			}
 			ui.List(c, &st.sidebarList, len(rows), func(i int) {
 				r := rows[i]
-				if r.Header != "" {
+				switch r.Kind {
+				case rowSpacer:
+					// The gap after a group, as SIDEBAR_GROUP_SPACER_HEIGHT.
+					ui.Row(c).Height(groupSpacer)
+					return
+
+				case rowShowMore:
+					// "Show more": text 12.5, muted, brightening on hover, as
+					// the reference's render_sidebar_show_more draws it (h30,
+					// indented past the group's children).
+					more := ui.Row(c).Height(showMoreRowHeight).
+						MarginX(sidebarPadX).PaddingStart(groupChildPadding).
+						AlignItems(ui.Center)
+					more.Children(func() {
+						txt := ui.Text(c, "Show more").FontSize(12.5).
+							TextColor(t.TextMuted)
+						if more.Hovered() {
+							txt.TextColor(t.Text)
+						}
+					})
+					if more.Clicked() {
+						st.showMoreIn(r.Group)
+					}
+					return
+
+				case rowHeader:
 					// A group header: the name, and a chevron on the right
-					// that folds the group, as the reference's
-					// render_sidebar_group_header shows.
+					// that folds the group. Its hover and pressed states take
+					// the same rounded shape as a session row, as the
+					// reference's header does (rounded(6)).
 					folded := st.foldedGroups[r.Header]
 					hovered := false
 					hdr := ui.Row(c).Height(groupHeaderHeight).MarginX(sidebarPadX).
-						Padding(0, 8).AlignItems(ui.Center)
+						Radius(6).Padding(0, 8).AlignItems(ui.Center)
 					hdr.Children(func() {
 						ui.Text(c, r.Header).FontSize(13).FontWeight(500).
 							TextColor(t.TextMuted).Grow(1)
@@ -402,12 +430,7 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 						hdr.Background(itemBg(t))
 					}
 					if hdr.Clicked() {
-						st.mu.Lock()
-						if st.foldedGroups == nil {
-							st.foldedGroups = map[string]bool{}
-						}
-						st.foldedGroups[r.Header] = !folded
-						st.mu.Unlock()
+						st.toggleGroup(r.Header)
 					}
 					return
 				}
@@ -478,40 +501,108 @@ func (st *state) sidebarTitlebar(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// sidebarRow is one row of the session list: a group header, or a session
-// belonging to a group. A folded group contributes only its header.
+// sidebarRowKind says what a sidebar row is.
+type sidebarRowKind int
+
+const (
+	rowHeader sidebarRowKind = iota
+	rowSession
+	rowShowMore
+	rowSpacer
+)
+
+// sidebarRow is one row of the session list: a group header, a session, a
+// "Show more" button, or the spacer that separates groups.
 type sidebarRow struct {
-	Header string       // the group name, when this row is a header
+	Kind   sidebarRowKind
+	Header string       // the group name, for a header
 	Group  string       // the group this row belongs to
 	Sess   opencode.Session
 }
 
 // key is the row's stable identity for the list, so state follows its item.
 func (r sidebarRow) key() any {
-	if r.Header != "" {
+	switch r.Kind {
+	case rowHeader:
 		return "h:" + r.Header
+	case rowShowMore:
+		return "m:" + r.Group
+	case rowSpacer:
+		return "s:" + r.Group
+	default:
+		return r.Sess.ID
 	}
-	return r.Sess.ID
 }
 
-// buildSidebarRows turns sessions into the list's rows: a header when the
-// group changes, then that group's sessions unless it is folded. It is pure,
-// so the folding rules are testable without a window.
-func buildSidebarRows(sessions []opencode.Session, folded map[string]bool) []sidebarRow {
-	rows := make([]sidebarRow, 0, len(sessions))
-	last := ""
+// buildSidebarRows turns sessions into the list's rows: for each group a
+// header, then its sessions up to the number revealed, a "Show more" row while
+// more remain, and a spacer after the group so groups do not read as one — the
+// shape of the reference's append_sidebar_group_rows.
+//
+// It is pure, so the folding and pagination rules are testable without a
+// window.
+func buildSidebarRows(sessions []opencode.Session, folded map[string]bool, revealed map[string]int) []sidebarRow {
+	// Bucket the sessions by group, keeping the order they arrived in.
+	var order []string
+	byGroup := map[string][]opencode.Session{}
 	for _, s := range sessions {
 		g := sessionGroup(s)
-		if g != last {
-			rows = append(rows, sidebarRow{Header: g, Group: g})
-			last = g
+		if _, seen := byGroup[g]; !seen {
+			order = append(order, g)
 		}
+		byGroup[g] = append(byGroup[g], s)
+	}
+
+	var rows []sidebarRow
+	for _, g := range order {
+		group := byGroup[g]
+		rows = append(rows, sidebarRow{Kind: rowHeader, Header: g, Group: g})
 		if folded[g] {
+			rows = append(rows, sidebarRow{Kind: rowSpacer, Group: g})
 			continue
 		}
-		rows = append(rows, sidebarRow{Group: g, Sess: s})
+		// How many of the group's sessions show: the batches revealed so far,
+		// or the first batch when none has been revealed yet. A group no
+		// longer than the batch shows whole, with no Show more row.
+		shown := len(group)
+		if n, ok := revealed[g]; ok {
+			if n < len(group) {
+				shown = n
+			}
+		} else if len(group) > revealBatch {
+			shown = revealBatch
+		}
+		for _, s := range group[:shown] {
+			rows = append(rows, sidebarRow{Kind: rowSession, Group: g, Sess: s})
+		}
+		if shown < len(group) {
+			rows = append(rows, sidebarRow{Kind: rowShowMore, Group: g})
+		}
+		rows = append(rows, sidebarRow{Kind: rowSpacer, Group: g})
 	}
 	return rows
+}
+
+// toggleGroup folds or unfolds one sidebar group, as the reference's
+// toggle_sidebar_group does.
+func (st *state) toggleGroup(group string) {
+	st.mu.Lock()
+	if st.foldedGroups == nil {
+		st.foldedGroups = map[string]bool{}
+	}
+	st.foldedGroups[group] = !st.foldedGroups[group]
+	st.mu.Unlock()
+}
+
+// showMoreIn reveals the next batch of a group's sessions, as
+// show_more_project_sessions does (SIDEBAR_PROJECT_REVEAL_BATCH at a time).
+func (st *state) showMoreIn(group string) {
+	st.mu.Lock()
+	if st.revealedGroups == nil {
+		st.revealedGroups = map[string]int{}
+	}
+	st.revealedGroups[group] += revealBatch
+	st.mu.Unlock()
 }
 
 // foldAllGroups folds or unfolds every group in the sidebar, as the
