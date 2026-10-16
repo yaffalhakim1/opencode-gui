@@ -28,7 +28,7 @@ Day 1–5 of the plan in [`docs/ROADMAP.md`](docs/ROADMAP.md) are done and verif
 
 ```powershell
 go tool mygo dev      # develop with live reload
-go test               # view tests, no window needed
+go test ./...         # all tests, no window needed
 go tool mygo build    # packaged app in build/windows-amd64/
 ```
 

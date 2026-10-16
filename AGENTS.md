@@ -61,15 +61,24 @@ daemon so a phone can drive the same sessions over Tailscale.
 
 ## Layout of the code
 
+The root holds only the entry point; every other Go file lives in `src/`
+(one package). Tests sit beside the code they test, because Go resolves
+package internals by directory — a test in `tests/` would be a *different*
+package and could only reach exported names.
+
 | Path | Responsibility |
 |---|---|
-| `main.go` | app state, the view tree, the OpenCode event loop |
-| `composer.go` | the prompt card: model/agent/access menus, queue, attachments |
-| `panel.go` | the right pane: Files / Review / Browser / Terminal surfaces |
-| `settings.go` | the Settings page and its seven sections |
-| `theme.go` | the Kerenzikov palette mapped onto `ui.Theme`, shared styling |
-| `layout.go` | pure panel-fitting maths (ported from the reference) |
-| `daemon_wire.go` | daemon methods, from `docs/PROTOCOL.md` |
+| `main.go` | entry point only: calls `src.Run()` |
+| `src/app.go` | app state, the view tree, the OpenCode event loop |
+| `src/composer.go` | the prompt card: model/agent/access menus, queue, attachments |
+| `src/panel.go` | the right pane: Files / Review / Browser / Terminal surfaces |
+| `src/settings.go` | the Settings page and its seven sections |
+| `src/theme.go` | the Kerenzikov palette mapped onto `ui.Theme`, shared styling |
+| `src/icons.go` | embedded SVG icons (from the reference's assets) |
+| `src/layout.go` | pure panel-fitting maths (ported from the reference) |
+| `src/daemon_wire.go` | daemon methods, from `docs/PROTOCOL.md` |
+| `src/assets/icons/` | the SVGs, embedded by `icons.go` |
+| `src/*_test.go` | tests for the package's own logic |
 | `internal/opencode` | HTTP client of the OpenCode server + SSE |
 | `internal/app` | the service layer the view calls |
 | `internal/daemon` | the WS server for phones |

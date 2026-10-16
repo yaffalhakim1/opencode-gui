@@ -1,0 +1,804 @@
+package src
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
+	"github.com/egoist/mygo/ui/markdown"
+
+	"opencode-gui/internal/app"
+	"opencode-gui/internal/daemon"
+	"opencode-gui/internal/opencode"
+)
+
+// message is one chat row: a user prompt or an assistant reply.
+type message struct {
+	ID   string
+	Role string // "user" | "assistant"
+	Text string
+	Done bool
+}
+
+// state is what the window shows.
+type state struct {
+	sessions *app.Sessions
+	win      *mygo.Window
+	mu       sync.Mutex
+
+	sessionsList []opencode.Session
+	active       string // active session ID
+	messages     []message
+	diffs        []opencode.FileDiff
+
+	prompt  string
+	status  string
+	running bool
+	tab     int // inspector tab: 0 diff, 1 files
+
+	sidebarWidth   float32
+	sidebarList    ui.ListState
+	chatList       ui.ListState
+	md             markdown.Options
+	diffState      *editor.DiffState
+	daemon         *daemon.Daemon
+	daemonURL      string
+	diffFile       string
+	filter         string
+	modelName      string
+	set            settings
+	leftCollapsed  bool
+	rightCollapsed bool
+	ctx            context.Context
+	cancelSession  context.CancelFunc
+
+	// Composer: attachments, queued follow-ups, and the controls.
+	attachments     []string
+	queued          []string
+	models          []opencode.Model
+	modelPickerOpen bool
+	modelQuery      string
+	agents          []opencode.Agent
+	agentIdx        int
+	accessMode      int
+	pending         *opencode.PermissionRequest
+	branch          string
+	surface         int
+	fsEntries       []opencode.FSEntry
+	filesReady      bool
+	foldedGroups    map[string]bool
+	revealedGroups  map[string]int
+	oldestFirst     bool
+	openPath        string
+	openText        string
+	pendingToast    string
+}
+
+// Run starts the app: it connects to the OpenCode server, hosts the daemon and
+// opens the window. It returns when the app quits.
+func Run() {
+	st := &state{
+		sessions:     &app.Sessions{},
+		sidebarWidth: sidebarWidthDefault,
+		ctx:          context.Background(),
+	}
+	st.chatList.FollowEnd = true
+	st.chatList.FollowAnimation = &ui.Smooth
+	st.chatList.Key = func(i int) any {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		if i < len(st.messages) {
+			return st.messages[i].ID
+		}
+		return i
+	}
+
+	mygo.App.WhenReady(func() {
+		if err := st.sessions.Start(st.ctx); err != nil {
+			log.Printf("opencode: %v", err)
+			st.status = err.Error()
+		} else {
+			st.loadSessions()
+			st.startDaemon(st.ctx)
+			go func() { time.Sleep(time.Second); st.loadModel() }()
+		}
+		st.win = mygo.NewWindow(mygo.WindowOptions{
+			Title:     "OpenCode GUI",
+			Width:     1280,
+			Height:    800,
+			MinWidth:  900,
+			MinHeight: 560,
+			StateKey:  "main",
+			Content:   ui.View(st.view),
+		})
+		// OPENCODE_GUI_SETTINGS opens the Settings page at launch, for
+		// development and screenshots.
+		if os.Getenv("OPENCODE_GUI_SETTINGS") != "" {
+			st.openSettings()
+		}
+		st.startWatch()
+	})
+	if err := mygo.App.Run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// loadSessions refreshes the session list (blocking; call from a goroutine
+// or before the window opens).
+func (st *state) loadSessions() {
+	list, err := st.sessions.List(st.ctx)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if err != nil {
+		st.status = "sessions: " + err.Error()
+		return
+	}
+	st.sessionsList = list
+	if st.active == "" && len(list) > 0 {
+		st.active = list[0].ID
+	}
+}
+
+// startWatch streams events and refreshes the active session's messages.
+func (st *state) startWatch() {
+	go func() {
+		for {
+			st.mu.Lock()
+			sid := st.active
+			st.mu.Unlock()
+			if sid == "" {
+				time.Sleep(time.Second)
+				continue
+			}
+			st.sessions.Watch(st.ctx, sid, func() { st.refreshActive() })
+			time.Sleep(500 * time.Millisecond)
+		}
+	}()
+}
+
+// refreshActive re-reads the active session's messages and diffs.
+func (st *state) refreshActive() {
+	st.mu.Lock()
+	sid := st.active
+	st.mu.Unlock()
+	if sid == "" {
+		return
+	}
+	msgs, err := st.sessions.Messages(st.ctx, sid)
+	if err != nil {
+		return
+	}
+	diffs, _ := st.sessions.Diff(st.ctx, sid)
+
+	st.mu.Lock()
+	converted := make([]message, 0, len(msgs))
+	running := false
+	for _, m := range msgs {
+		role := "user"
+		done := true
+		switch m.Info.Type {
+		case "assistant":
+			role = "assistant"
+		case "idle", "error":
+			continue
+		}
+		if m.Info.Type == "assistant" {
+			// An assistant message without a finish is still streaming.
+			if m.Info.Finish == "" {
+				running = true
+				done = false
+			}
+		}
+		var b strings.Builder
+		for _, p := range m.Parts {
+			if p.Type == "text" && p.Text != "" {
+				if b.Len() > 0 {
+					b.WriteString("\n\n")
+				}
+				b.WriteString(p.Text)
+			}
+		}
+		if b.Len() == 0 && role == "assistant" {
+			continue
+		}
+		converted = append(converted, message{ID: m.Info.ID, Role: role, Text: b.String(), Done: done})
+	}
+	st.messages = converted
+	st.diffs = diffs
+	st.running = running
+	st.status = ""
+	st.mu.Unlock()
+
+	if st.daemon != nil {
+		st.daemon.Broadcast("session.updated", map[string]any{"sessionID": sid})
+	}
+	// A settled turn releases the next queued follow-up, and a new tool call
+	// asks for an answer.
+	if !running {
+		go st.flushQueued()
+	}
+	go st.refreshPermissions()
+	st.win.Update(func() {})
+}
+
+// loadModel sets the model name shown in the composer chip.
+func (st *state) loadModel() {
+	agents, err := st.sessions.Agents(st.ctx)
+	if err != nil {
+		return
+	}
+	st.mu.Lock()
+	st.agents = agents
+	// The agent the composer starts on: the primary build agent, else the first.
+	st.agentIdx = 0
+	for i, a := range agents {
+		if a.Model != nil && a.Model.ID != "" {
+			st.modelName = a.Model.ID
+			st.agentIdx = i
+			break
+		}
+	}
+	st.mu.Unlock()
+	st.win.Update(func() {})
+}
+
+func (st *state) view(c *ui.Context) {
+	t := kerenzikovTheme(c.Theme().Dark)
+	c.SetTheme(t)
+
+	if st.set.open {
+		st.settingsView(c, t)
+		return
+	}
+
+	// A tool call waiting for an answer sits above everything.
+	st.permissionDialog(c, t)
+	st.flushToast(c)
+
+	ui.Row(c).FillWidth().FillHeight().AlignItems(ui.Stretch).Children(func() {
+		// Fit the panels to the window so the chat keeps a usable width.
+		w, _ := c.Size()
+		leftW, rightW := fittedPanelWidths(
+			w, !st.leftCollapsed, st.tab >= 0 && !st.rightCollapsed,
+			st.sidebarWidth, panelWidthDefault,
+		)
+
+		// ── Sidebar (collapsible) ────────────────────────────────
+		if !st.leftCollapsed {
+			st.sidebar(c, t, leftW)
+		}
+
+		// ── Chat ─────────────────────────────────────────────────
+		ui.Column(c).Grow(1).FillHeight().Children(func() {
+			st.toolbar(c, t)
+			st.chat(c, t)
+			st.modelPicker(c, t)
+			st.composer(c, t)
+			st.statusLine(c, t)
+		})
+
+		// ── Right panel (collapsible) ────────────────────────────
+		if st.tab >= 0 && !st.rightCollapsed {
+			ui.Column(c).Width(rightW).FillHeight().
+				Background(t.Background).
+				BorderWidth(0, 0, 0, 1).BorderColor(t.Border).
+				Children(func() {
+					st.panel(c, t)
+				})
+		}
+	})
+}
+
+// sidebar lists sessions with a search field and time groups, as the
+// reference app's source list.
+func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
+	st.mu.Lock()
+	sel := st.active
+	sessions := append([]opencode.Session(nil), st.sessionsList...)
+	query := st.filter
+	st.mu.Unlock()
+
+	ui.Column(c).Width(width).FillHeight().
+		Background(sidebarColor(t)).
+		BorderWidth(0, 1, 0, 0).BorderColor(t.Border).
+		Children(func() {
+			// Title bar: the panel toggle, then Back and Forward, as the
+			// reference's sidebar titlebar (h48, px10, gap2).
+			st.sidebarTitlebar(c, t)
+
+			// New task is a plain action row with a leading icon, not a
+			// filled button, as render_sidebar_action_row builds it.
+			ui.Column(c).FillWidth().Padding(0, sidebarPadX).Children(func() {
+				row := iconRow(c, t, iconCompose, "New task")
+				if row.Hovered() {
+					row.Background(itemBg(t))
+				}
+				if row.Clicked() {
+					go st.newSession()
+				}
+			})
+
+			ui.Column(c).FillWidth().Padding(6, sidebarPadX, 0).Children(func() {
+				ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.SearchField(c, &st.filter).Label("Filter tasks").Grow(1)
+					// The filter menu: what to group and order by, and folding
+					// every group, as the reference's sidebar-options menu.
+					menu := actionIconButton(c, iconListFilter, "Sidebar options")
+					menu.Menu(func(m *ui.Menu) {
+						label := "Newest first"
+						if st.oldestFirst {
+							label = "Oldest first"
+						}
+						if m.Item(label).Chosen() {
+							st.mu.Lock()
+							st.oldestFirst = !st.oldestFirst
+							st.mu.Unlock()
+						}
+						m.Separator()
+						if m.Item("Fold all groups").Chosen() {
+							st.foldAllGroups(true)
+						}
+						if m.Item("Unfold all groups").Chosen() {
+							st.foldAllGroups(false)
+						}
+					})
+				})
+			})
+
+			// The session list is a List, which builds only the rows in view,
+			// so a long history stays cheap.
+			visible := make([]opencode.Session, 0, len(sessions))
+			for _, s := range sessions {
+				if query != "" &&
+					!strings.Contains(strings.ToLower(sessionLabel(s)), strings.ToLower(query)) {
+					continue
+				}
+				visible = append(visible, s)
+			}
+			if st.oldestFirst {
+				// The server sends newest first, so reverse for oldest first.
+				for i, j := 0, len(visible)-1; i < j; i, j = i+1, j-1 {
+					visible[i], visible[j] = visible[j], visible[i]
+				}
+			}
+			// Rows are the headers, the sessions of the groups that are open,
+			// a "Show more" row while a group has more, and a spacer after
+			// each group so groups read apart.
+			rows := buildSidebarRows(visible, st.foldedGroups, st.revealedGroups)
+
+			st.sidebarList.Key = func(i int) any {
+				if i >= len(rows) {
+					return i
+				}
+				return rows[i].key()
+			}
+			ui.List(c, &st.sidebarList, len(rows), func(i int) {
+				r := rows[i]
+				switch r.Kind {
+				case rowSpacer:
+					// The gap after a group, as SIDEBAR_GROUP_SPACER_HEIGHT.
+					ui.Row(c).Height(groupSpacer)
+					return
+
+				case rowShowMore:
+					// "Show more": text 12.5, muted, brightening on hover, as
+					// the reference's render_sidebar_show_more draws it (h30,
+					// indented past the group's children).
+					more := ui.Row(c).Height(showMoreRowHeight).
+						MarginX(sidebarPadX).PaddingStart(groupChildPadding).
+						AlignItems(ui.Center)
+					more.Children(func() {
+						txt := ui.Text(c, "Show more").FontSize(12.5).
+							TextColor(t.TextMuted)
+						if more.Hovered() {
+							txt.TextColor(t.Text)
+						}
+					})
+					if more.Clicked() {
+						st.showMoreIn(r.Group)
+					}
+					return
+
+				case rowHeader:
+					// A group header: the name, and a chevron on the right
+					// that folds the group. Its hover and pressed states take
+					// the same rounded shape as a session row, as the
+					// reference's header does (rounded(6)).
+					folded := st.foldedGroups[r.Header]
+					hovered := false
+					hdr := ui.Row(c).Height(groupHeaderHeight).MarginX(sidebarPadX).
+						Radius(6).Padding(0, 8).AlignItems(ui.Center)
+					hdr.Children(func() {
+						ui.Text(c, r.Header).FontSize(13).FontWeight(500).
+							TextColor(t.TextMuted).Grow(1)
+						chev := ui.Icon(c, iconChevronDown).Size(14, 14).
+							TextColor(t.TextMuted)
+						if folded {
+							chev.Rotate(-90)
+						}
+						if !hovered {
+							chev.Invisible()
+						}
+					})
+					hovered = hdr.Hovered()
+					if hovered {
+						hdr.Background(itemBg(t))
+					}
+					if hdr.Clicked() {
+						st.toggleGroup(r.Header)
+					}
+					return
+				}
+
+				s := r.Sess
+				row := ui.Row(c).MarginX(sidebarPadX).Radius(7).
+					Padding(7, 10).Gap(6).AlignItems(ui.Center)
+				row.Children(func() {
+					ui.Text(c, truncate(sessionLabel(s), 30)).FontSize(13.5).Grow(1).
+						MaxLines(1).Ellipsis("…")
+					if s.ID == sel {
+						ui.Text(c, "•").TextColor(t.Accent)
+					}
+				})
+				if row.Hovered() {
+					row.Background(itemBg(t))
+				}
+				if s.ID == sel {
+					row.Background(itemBg(t))
+				}
+				if row.Clicked() {
+					st.selectSession(s.ID)
+				}
+			}).Grow(1).Children(func() {
+				if len(rows) == 0 {
+					ui.Text(c, "No sessions").FontSize(13).TextColor(t.TextMuted).
+						MarginX(sidebarPadX).Padding(8)
+				}
+			})
+
+			// Footer: the connected-phone count and the icon buttons, with no
+			// "Daemon" label — the badge says it, as the reference's status
+			// rows do.
+			ui.Column(c).FillWidth().Gap(6).Padding(8, sidebarPadX).
+				BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
+				clients := 0
+				if st.daemon != nil {
+					clients = st.daemon.Clients()
+				}
+				ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Badge(c, fmt.Sprintf("%d phone(s)", clients)).
+						Padding(4, 12)
+					ui.Spacer(c)
+					if actionIconButton(c, iconCopy, "Copy connect URL").Clicked() {
+						mygo.Clipboard.WriteText(st.daemonURL)
+						c.Toast("Connect URL copied")
+					}
+					if actionIconButton(c, iconSettings, "Settings").Clicked() {
+						st.openSettings()
+					}
+				})
+			})
+		})
+}
+
+// sidebarTitlebar is the strip above the sidebar's actions: the panel toggle
+// on the left, then Back and Forward, as the reference's sidebar titlebar.
+func (st *state) sidebarTitlebar(c *ui.Context, t *ui.Theme) {
+	ui.Row(c).FillWidth().Height(titlebarHeight).Padding(0, sidebarPadX).
+		AlignItems(ui.Center).Children(func() {
+		if actionIconButton(c, iconPanelLeft, "Toggle left panel").Clicked() {
+			st.leftCollapsed = true
+		}
+		ui.Row(c).Gap(2).PaddingStart(6).Children(func() {
+			actionIconButton(c, iconArrowLeft, "Back")
+			actionIconButton(c, iconArrowRight, "Forward")
+		})
+	})
+}
+
+// sidebarRowKind says what a sidebar row is.
+type sidebarRowKind int
+
+const (
+	rowHeader sidebarRowKind = iota
+	rowSession
+	rowShowMore
+	rowSpacer
+)
+
+// sidebarRow is one row of the session list: a group header, a session, a
+// "Show more" button, or the spacer that separates groups.
+type sidebarRow struct {
+	Kind   sidebarRowKind
+	Header string       // the group name, for a header
+	Group  string       // the group this row belongs to
+	Sess   opencode.Session
+}
+
+// key is the row's stable identity for the list, so state follows its item.
+func (r sidebarRow) key() any {
+	switch r.Kind {
+	case rowHeader:
+		return "h:" + r.Header
+	case rowShowMore:
+		return "m:" + r.Group
+	case rowSpacer:
+		return "s:" + r.Group
+	default:
+		return r.Sess.ID
+	}
+}
+
+// buildSidebarRows turns sessions into the list's rows: for each group a
+// header, then its sessions up to the number revealed, a "Show more" row while
+// more remain, and a spacer after the group so groups do not read as one — the
+// shape of the reference's append_sidebar_group_rows.
+//
+// It is pure, so the folding and pagination rules are testable without a
+// window.
+func buildSidebarRows(sessions []opencode.Session, folded map[string]bool, revealed map[string]int) []sidebarRow {
+	// Bucket the sessions by group, keeping the order they arrived in.
+	var order []string
+	byGroup := map[string][]opencode.Session{}
+	for _, s := range sessions {
+		g := sessionGroup(s)
+		if _, seen := byGroup[g]; !seen {
+			order = append(order, g)
+		}
+		byGroup[g] = append(byGroup[g], s)
+	}
+
+	var rows []sidebarRow
+	for _, g := range order {
+		group := byGroup[g]
+		rows = append(rows, sidebarRow{Kind: rowHeader, Header: g, Group: g})
+		if folded[g] {
+			rows = append(rows, sidebarRow{Kind: rowSpacer, Group: g})
+			continue
+		}
+		// How many of the group's sessions show: the batches revealed so far,
+		// or the first batch when none has been revealed yet. A group no
+		// longer than the batch shows whole, with no Show more row.
+		shown := len(group)
+		if n, ok := revealed[g]; ok {
+			if n < len(group) {
+				shown = n
+			}
+		} else if len(group) > revealBatch {
+			shown = revealBatch
+		}
+		for _, s := range group[:shown] {
+			rows = append(rows, sidebarRow{Kind: rowSession, Group: g, Sess: s})
+		}
+		if shown < len(group) {
+			rows = append(rows, sidebarRow{Kind: rowShowMore, Group: g})
+		}
+		rows = append(rows, sidebarRow{Kind: rowSpacer, Group: g})
+	}
+	return rows
+}
+
+// toggleGroup folds or unfolds one sidebar group, as the reference's
+// toggle_sidebar_group does.
+func (st *state) toggleGroup(group string) {
+	st.mu.Lock()
+	if st.foldedGroups == nil {
+		st.foldedGroups = map[string]bool{}
+	}
+	st.foldedGroups[group] = !st.foldedGroups[group]
+	st.mu.Unlock()
+}
+
+// showMoreIn reveals the next batch of a group's sessions, as
+// show_more_project_sessions does (SIDEBAR_PROJECT_REVEAL_BATCH at a time).
+func (st *state) showMoreIn(group string) {
+	st.mu.Lock()
+	if st.revealedGroups == nil {
+		st.revealedGroups = map[string]int{}
+	}
+	st.revealedGroups[group] += revealBatch
+	st.mu.Unlock()
+}
+
+// foldAllGroups folds or unfolds every group in the sidebar, as the
+// reference's collapse_all_sidebar_groups does.
+func (st *state) foldAllGroups(fold bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.foldedGroups == nil {
+		st.foldedGroups = map[string]bool{}
+	}
+	for _, g := range []string{"Today", "Yesterday", "This Week", "Older", "Sessions"} {
+		st.foldedGroups[g] = fold
+	}
+	st.win.Update(func() {})
+}
+
+// selectSession makes a session active and loads it.
+func (st *state) selectSession(id string) {
+	st.mu.Lock()
+	if id == st.active {
+		st.mu.Unlock()
+		return
+	}
+	st.active = id
+	st.messages = nil
+	st.diffs = nil
+	st.diffState = nil
+	st.mu.Unlock()
+	st.refreshActive()
+}
+
+// sessionGroup buckets a session by how recently it was touched, as the
+// reference app's sidebar groups are: Today, Yesterday, This Week, Older.
+func sessionGroup(s opencode.Session) string {
+	if s.LastActivity() == 0 {
+		return "Sessions"
+	}
+	t := time.UnixMilli(int64(s.LastActivity()))
+	now := time.Now()
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	switch {
+	case !t.Before(midnight):
+		return "Today"
+	case !t.Before(midnight.AddDate(0, 0, -1)):
+		return "Yesterday"
+	case !t.Before(midnight.AddDate(0, 0, -7)):
+		return "This Week"
+	default:
+		return "Older"
+	}
+}
+
+// truncate shortens s to n runes with an ellipsis.
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
+}
+
+// sessionLabel is a session's title, or a short stand-in for a session that
+// has none (a raw ses_… id reads as noise in the list).
+func sessionLabel(s opencode.Session) string {
+	if t := strings.TrimSpace(s.Title); t != "" {
+		return t
+	}
+	id := strings.TrimPrefix(s.ID, "ses_")
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	return "Session " + id
+}
+
+// newSession creates a session and makes it active.
+func (st *state) newSession() {
+	sess, err := st.sessions.New(st.ctx, "Session")
+	if err != nil {
+		return
+	}
+	st.mu.Lock()
+	st.sessionsList = append([]opencode.Session{sess}, st.sessionsList...)
+	st.active = sess.ID
+	st.messages = nil
+	st.diffs = nil
+	st.mu.Unlock()
+	st.win.Update(func() {})
+}
+
+// activeID reads the active session ID.
+func (st *state) activeID() string {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.active
+}
+
+// toolbar is the quiet top bar: title on the left, status and controls on
+// the right.
+func (st *state) toolbar(c *ui.Context, t *ui.Theme) {
+	st.mu.Lock()
+	running := st.running
+	status := st.status
+	active := st.active
+	st.mu.Unlock()
+
+	ui.Toolbar(c, func() {
+		// The left panel's toggle lives in the sidebar titlebar, so when the
+		// sidebar is collapsed this button brings it back.
+		if st.leftCollapsed {
+			if actionIconButton(c, iconPanelLeft, "Show left panel").Clicked() {
+				st.leftCollapsed = false
+			}
+		}
+
+		title := "New task"
+		st.mu.Lock()
+		for _, s := range st.sessionsList {
+			if s.ID == active && s.Title != "" {
+				title = s.Title
+			}
+		}
+		st.mu.Unlock()
+		ui.Text(c, truncate(title, 48)).FontSize(13.5).FontWeight(500).MaxLines(1)
+		ui.Spacer(c)
+		if running {
+			ui.Spinner(c)
+			if ui.Button(c, "Stop").Clicked() {
+				go func() { _ = st.sessions.Interrupt(st.ctx, active) }()
+			}
+		}
+		if status != "" {
+			ui.Text(c, status).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
+		}
+
+		// Top-right: expand/collapse the right panel.
+		rightGlyph := iconPanelLeft
+		if st.rightCollapsed {
+			rightGlyph = iconPanelLeft
+		}
+		if actionIconButton(c, rightGlyph, "Toggle right panel").Clicked() {
+			st.tab = 0
+			st.rightCollapsed = !st.rightCollapsed
+		}
+	}).FillWidth().Height(48).
+		BorderWidth(0, 0, 1, 0).BorderColor(t.Border)
+}
+
+// chat renders the message list, or the centered empty state.
+func (st *state) chat(c *ui.Context, t *ui.Theme) {
+	st.mu.Lock()
+	msgs := append([]message(nil), st.messages...)
+	st.mu.Unlock()
+
+	if len(msgs) == 0 {
+		ui.Column(c).Grow(1).FillWidth().Center().Gap(8).Children(func() {
+			ui.Text(c, "*").FontSize(26).TextColor(t.Accent)
+			ui.Text(c, "What should we build?").FontSize(22).Bold()
+			ui.Text(c, "Type below, or ask on your phone.").
+				FontSize(14).TextColor(t.TextMuted)
+		})
+		return
+	}
+
+	ui.List(c, &st.chatList, len(msgs), func(i int) {
+		m := msgs[i]
+		contentColumn(c, func() {
+			if m.Role == "assistant" {
+				ui.Column(c).FillWidth().Padding(10, 20).Children(func() {
+					if m.Done {
+						markdown.View(c, m.Text, &st.md)
+					} else {
+						markdown.Stream(c, m.Text, &st.md)
+					}
+				})
+				return
+			}
+			// The user's own message: a right-aligned rounded bubble.
+			ui.Row(c).FillWidth().Justify(ui.End).Padding(10, 20).Children(func() {
+				ui.Column(c).Radius(14).Padding(10, 14).MaxWidth(560).
+					Background(t.Surface).Border(1, t.Border).Children(func() {
+					ui.Text(c, m.Text).Wrap().Selectable().FillWidth()
+				})
+			})
+		})
+	}).Grow(1).Gap(4).Justify(ui.End)
+}
+
+// shortPath trims a long path to its last two segments.
+func shortPath(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	parts := strings.Split(p, "/")
+	if len(parts) <= 2 {
+		return p
+	}
+	return ".../" + strings.Join(parts[len(parts)-2:], "/")
+}
