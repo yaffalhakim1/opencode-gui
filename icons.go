@@ -51,6 +51,9 @@ var arrowRightSVG []byte
 //go:embed assets/icons/external-link.svg
 var externalLinkSVG []byte
 
+//go:embed assets/icons/list-filter.svg
+var listFilterSVG []byte
+
 var (
 	iconCompose      = ui.MustParseSVG(composeSVG)
 	iconPanelLeft    = ui.MustParseSVG(panelLeftSVG)
@@ -66,6 +69,7 @@ var (
 	iconArrowLeft    = ui.MustParseSVG(arrowLeftSVG)
 	iconArrowRight   = ui.MustParseSVG(arrowRightSVG)
 	iconExternalLink = ui.MustParseSVG(externalLinkSVG)
+	iconListFilter   = ui.MustParseSVG(listFilterSVG)
 )
 
 // surfaceIcon is the icon a right-panel surface shows, as the reference's

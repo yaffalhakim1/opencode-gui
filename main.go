@@ -73,6 +73,8 @@ type state struct {
 	surface         int
 	fsEntries       []opencode.FSEntry
 	filesReady      bool
+	foldedGroups    map[string]bool
+	oldestFirst     bool
 	openPath        string
 	openText        string
 	pendingToast    string
@@ -321,7 +323,30 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 			})
 
 			ui.Column(c).FillWidth().Padding(6, sidebarPadX, 0).Children(func() {
-				ui.SearchField(c, &st.filter).Label("Filter tasks").FillWidth()
+				ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.SearchField(c, &st.filter).Label("Filter tasks").Grow(1)
+					// The filter menu: what to group and order by, and folding
+					// every group, as the reference's sidebar-options menu.
+					menu := actionIconButton(c, iconListFilter, "Sidebar options")
+					menu.Menu(func(m *ui.Menu) {
+						label := "Newest first"
+						if st.oldestFirst {
+							label = "Oldest first"
+						}
+						if m.Item(label).Chosen() {
+							st.mu.Lock()
+							st.oldestFirst = !st.oldestFirst
+							st.mu.Unlock()
+						}
+						m.Separator()
+						if m.Item("Fold all groups").Chosen() {
+							st.foldAllGroups(true)
+						}
+						if m.Item("Unfold all groups").Chosen() {
+							st.foldAllGroups(false)
+						}
+					})
+				})
 			})
 
 			// The session list is a List, which builds only the rows in view,
@@ -334,34 +359,60 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 				}
 				visible = append(visible, s)
 			}
-			st.sidebarList.Key = func(i int) any {
-				if i < len(visible) {
-					return visible[i].ID
+			if st.oldestFirst {
+				// The server sends newest first, so reverse for oldest first.
+				for i, j := 0, len(visible)-1; i < j; i, j = i+1, j-1 {
+					visible[i], visible[j] = visible[j], visible[i]
 				}
-				return i
 			}
-			// The list spans the sidebar's full width so its scroll bar sits
-			// at the far right, as the reference's does (there the bar is a
-			// sibling of the padded list, on the outer container). The rows
-			// carry the inset instead, so a hovered or chosen row still lines
-			// up with the New task button above it.
-			ui.List(c, &st.sidebarList, len(visible), func(i int) {
-				s := visible[i]
-				// A group header whenever the bucket changes, as the
-				// reference app's Today / Yesterday / This Week rows.
-				if g := sessionGroup(s); i == 0 || g != sessionGroup(visible[i-1]) {
-					// The reference puts a 10-high spacer after each group,
-					// so a header is preceded by that gap (nothing before the
-					// first). The header itself is 28 high with px8.
-					if i > 0 {
-						ui.Row(c).Height(groupSpacer)
-					}
-					ui.Row(c).Height(groupHeaderHeight).MarginX(sidebarPadX).
-						Padding(0, 8).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, g).FontSize(13).FontWeight(500).
-							TextColor(t.TextMuted)
-					})
+			// Rows are the headers and the sessions of the groups that are
+			// open, so a folded group shows only its header.
+			rows := buildSidebarRows(visible, st.foldedGroups)
+
+			st.sidebarList.Key = func(i int) any {
+				if i >= len(rows) {
+					return i
 				}
+				return rows[i].key()
+			}
+			ui.List(c, &st.sidebarList, len(rows), func(i int) {
+				r := rows[i]
+				if r.Header != "" {
+					// A group header: the name, and a chevron on the right
+					// that folds the group, as the reference's
+					// render_sidebar_group_header shows.
+					folded := st.foldedGroups[r.Header]
+					hovered := false
+					hdr := ui.Row(c).Height(groupHeaderHeight).MarginX(sidebarPadX).
+						Padding(0, 8).AlignItems(ui.Center)
+					hdr.Children(func() {
+						ui.Text(c, r.Header).FontSize(13).FontWeight(500).
+							TextColor(t.TextMuted).Grow(1)
+						chev := ui.Icon(c, iconChevronDown).Size(14, 14).
+							TextColor(t.TextMuted)
+						if folded {
+							chev.Rotate(-90)
+						}
+						if !hovered {
+							chev.Invisible()
+						}
+					})
+					hovered = hdr.Hovered()
+					if hovered {
+						hdr.Background(itemBg(t))
+					}
+					if hdr.Clicked() {
+						st.mu.Lock()
+						if st.foldedGroups == nil {
+							st.foldedGroups = map[string]bool{}
+						}
+						st.foldedGroups[r.Header] = !folded
+						st.mu.Unlock()
+					}
+					return
+				}
+
+				s := r.Sess
 				row := ui.Row(c).MarginX(sidebarPadX).Radius(7).
 					Padding(7, 10).Gap(6).AlignItems(ui.Center)
 				row.Children(func() {
@@ -381,13 +432,15 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 					st.selectSession(s.ID)
 				}
 			}).Grow(1).Children(func() {
-				if len(visible) == 0 {
+				if len(rows) == 0 {
 					ui.Text(c, "No sessions").FontSize(13).TextColor(t.TextMuted).
 						MarginX(sidebarPadX).Padding(8)
 				}
 			})
 
-			// Footer: the daemon row and icon buttons for its URL and Settings.
+			// Footer: the connected-phone count and the icon buttons, with no
+			// "Daemon" label — the badge says it, as the reference's status
+			// rows do.
 			ui.Column(c).FillWidth().Gap(6).Padding(8, sidebarPadX).
 				BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
 				clients := 0
@@ -395,8 +448,9 @@ func (st *state) sidebar(c *ui.Context, t *ui.Theme, width float32) {
 					clients = st.daemon.Clients()
 				}
 				ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "Daemon").FontSize(11).TextColor(t.TextMuted).Grow(1)
-					ui.Badge(c, fmt.Sprintf("%d phone(s)", clients))
+					ui.Badge(c, fmt.Sprintf("%d phone(s)", clients)).
+						Padding(4, 12)
+					ui.Spacer(c)
 					if actionIconButton(c, iconCopy, "Copy connect URL").Clicked() {
 						mygo.Clipboard.WriteText(st.daemonURL)
 						c.Toast("Connect URL copied")
@@ -422,6 +476,56 @@ func (st *state) sidebarTitlebar(c *ui.Context, t *ui.Theme) {
 			actionIconButton(c, iconArrowRight, "Forward")
 		})
 	})
+}
+
+// sidebarRow is one row of the session list: a group header, or a session
+// belonging to a group. A folded group contributes only its header.
+type sidebarRow struct {
+	Header string       // the group name, when this row is a header
+	Group  string       // the group this row belongs to
+	Sess   opencode.Session
+}
+
+// key is the row's stable identity for the list, so state follows its item.
+func (r sidebarRow) key() any {
+	if r.Header != "" {
+		return "h:" + r.Header
+	}
+	return r.Sess.ID
+}
+
+// buildSidebarRows turns sessions into the list's rows: a header when the
+// group changes, then that group's sessions unless it is folded. It is pure,
+// so the folding rules are testable without a window.
+func buildSidebarRows(sessions []opencode.Session, folded map[string]bool) []sidebarRow {
+	rows := make([]sidebarRow, 0, len(sessions))
+	last := ""
+	for _, s := range sessions {
+		g := sessionGroup(s)
+		if g != last {
+			rows = append(rows, sidebarRow{Header: g, Group: g})
+			last = g
+		}
+		if folded[g] {
+			continue
+		}
+		rows = append(rows, sidebarRow{Group: g, Sess: s})
+	}
+	return rows
+}
+
+// foldAllGroups folds or unfolds every group in the sidebar, as the
+// reference's collapse_all_sidebar_groups does.
+func (st *state) foldAllGroups(fold bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.foldedGroups == nil {
+		st.foldedGroups = map[string]bool{}
+	}
+	for _, g := range []string{"Today", "Yesterday", "This Week", "Older", "Sessions"} {
+		st.foldedGroups[g] = fold
+	}
+	st.win.Update(func() {})
 }
 
 // selectSession makes a session active and loads it.

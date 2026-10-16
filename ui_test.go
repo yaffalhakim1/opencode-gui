@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/ui"
+
+	"opencode-gui/internal/app"
 	"opencode-gui/internal/opencode"
 )
 
@@ -360,5 +364,89 @@ func TestSurfaceCardsMatchTheReference(t *testing.T) {
 	}
 	if !surfaces[surfReview].Avail || surfaces[surfReview].Desc != "Review file changes" {
 		t.Error("the Review surface should be available with the reference description")
+	}
+}
+
+// todaySession is a session updated just now, so it lands in the "Today"
+// group whatever the date.
+func todaySession(id, title string) opencode.Session {
+	var s opencode.Session
+	s.ID, s.Title = id, title
+	s.Time.Updated = float64(time.Now().UnixMilli())
+	return s
+}
+
+func TestFoldingAGroupHidesItsSessions(t *testing.T) {
+	// The row builder skips a folded group's sessions but keeps its header,
+	// as the reference's sidebar_rows does.
+	rows := buildSidebarRows([]opencode.Session{
+		todaySession("a", "today one"),
+		todaySession("b", "today two"),
+	}, map[string]bool{"Today": true})
+
+	if len(rows) != 1 {
+		t.Fatalf("%d rows, want just the header", len(rows))
+	}
+	if rows[0].Header != "Today" {
+		t.Errorf("header = %q, want Today", rows[0].Header)
+	}
+}
+
+func TestUnfoldedGroupKeepsItsSessions(t *testing.T) {
+	rows := buildSidebarRows([]opencode.Session{
+		todaySession("a", "one"),
+		todaySession("b", "two"),
+	}, nil)
+
+	if len(rows) != 3 { // header + two sessions
+		t.Fatalf("%d rows, want a header and two sessions", len(rows))
+	}
+	if rows[0].Header == "" {
+		t.Error("the first row should be the group header")
+	}
+}
+
+func TestSidebarRowsCarryAStableKey(t *testing.T) {
+	rows := buildSidebarRows([]opencode.Session{todaySession("ses_x", "x")}, nil)
+	if got := rows[0].key(); got != "h:Today" {
+		t.Errorf("header key = %q, want h:Today", got)
+	}
+	if got := rows[1].key(); got != "ses_x" {
+		t.Errorf("session key = %q, want ses_x", got)
+	}
+}
+
+func TestFoldingOneGroupLeavesTheOthers(t *testing.T) {
+	now := time.Now()
+	older := func(id, title string, daysAgo int) opencode.Session {
+		var s opencode.Session
+		s.ID, s.Title = id, title
+		s.Time.Updated = float64(now.AddDate(0, 0, -daysAgo).UnixMilli())
+		return s
+	}
+	rows := buildSidebarRows([]opencode.Session{
+		todaySession("t1", "today"),
+		older("y1", "yesterday", 1),
+	}, map[string]bool{"Yesterday": true})
+
+	// Today's header and its session, then Yesterday's header alone.
+	if len(rows) != 3 {
+		t.Fatalf("%d rows, want Today + its session + the Yesterday header", len(rows))
+	}
+	if rows[0].Header != "Today" || rows[1].Sess.ID != "t1" || rows[2].Header != "Yesterday" {
+		t.Errorf("rows = %+v", rows)
+	}
+}
+
+func TestSidebarHasNoDaemonLabel(t *testing.T) {
+	st := &state{
+		sessions:     &app.Sessions{},
+		sidebarWidth: sidebarWidthDefault,
+		ctx:          context.Background(),
+		tab:          0,
+	}
+	tt := ui.NewTester(st.view, 1280, 800)
+	if tt.HasText("Daemon") {
+		t.Error("the footer still shows the word Daemon")
 	}
 }
